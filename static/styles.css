@@ -1,0 +1,270 @@
+:root {
+  color-scheme: light;
+  --bg: #f4efe6;
+  --panel: #fffaf3;
+  --panel-strong: #f0e1c6;
+  --line: #d6c8b0;
+  --text: #1c1914;
+  --muted: #6e6456;
+  --accent: #19647e;
+  --accent-strong: #0d4f63;
+  --bubble-self: #cfe8ef;
+  --bubble-other: #f8ead6;
+  --shadow: 0 20px 60px rgba(44, 35, 20, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.8), transparent 35%),
+    linear-gradient(135deg, #efe3cf 0%, #f8f3eb 42%, #e6ece7 100%);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 24px;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.sidebar,
+.chat-panel {
+  min-height: 0;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.brand,
+.card,
+.messages-header,
+.messages,
+.composer {
+  background: rgba(255, 250, 243, 0.88);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(214, 200, 176, 0.9);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+}
+
+.brand,
+.card,
+.messages-header,
+.composer {
+  padding: 20px;
+}
+
+.brand h1,
+.messages-header h2 {
+  margin: 4px 0 10px;
+}
+
+.subtitle,
+.hint,
+.message-meta,
+.message-time,
+.server-url {
+  color: var(--muted);
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.74rem;
+  color: var(--accent);
+}
+
+.card label,
+.section-title {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+#username,
+#message-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 12px 14px;
+  color: var(--text);
+}
+
+#message-input {
+  resize: vertical;
+  min-height: 92px;
+}
+
+.chat-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 18px;
+}
+
+.messages-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.status-pill {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: var(--panel-strong);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.messages {
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.empty-state {
+  margin: auto;
+  max-width: 320px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.message {
+  max-width: min(560px, 100%);
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(28, 25, 20, 0.08);
+}
+
+.message.self {
+  margin-left: auto;
+  background: var(--bubble-self);
+}
+
+.message.other {
+  background: var(--bubble-other);
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.message-user {
+  font-weight: 700;
+}
+
+.message-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent-strong);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.composer {
+  display: grid;
+  gap: 14px;
+}
+
+.message-form,
+.file-form {
+  display: grid;
+  gap: 12px;
+}
+
+.file-form {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.file-picker,
+button {
+  border: none;
+  border-radius: 16px;
+  padding: 12px 16px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+  font-weight: 700;
+  text-align: center;
+}
+
+.file-picker:hover,
+button:hover {
+  background: var(--accent-strong);
+  transform: translateY(-1px);
+}
+
+#file-input {
+  display: none;
+}
+
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-panel {
+    min-height: 70vh;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .messages-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .file-form {
+    grid-template-columns: 1fr;
+  }
+
+  .message {
+    max-width: 100%;
+  }
+}

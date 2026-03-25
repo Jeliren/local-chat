@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Chat</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="eyebrow">Локальная сеть</p>
+          <h1>Local Chat</h1>
+          <p class="subtitle">Простой чат для дома, офиса или общей Wi-Fi сети.</p>
+        </div>
+
+        <section class="card">
+          <label for="username">Ваше имя</label>
+          <input id="username" maxlength="40" placeholder="Например, Alex" />
+          <p class="hint">Имя сохранится в этом браузере.</p>
+        </section>
+
+        <section class="card">
+          <p class="section-title">Как подключиться</p>
+          <p id="server-url" class="server-url">Определяю адрес...</p>
+          <p class="hint">Откройте этот адрес на других устройствах в той же сети.</p>
+        </section>
+      </aside>
+
+      <main class="chat-panel">
+        <div class="messages-header">
+          <div>
+            <p class="eyebrow">Сообщения</p>
+            <h2>Общий чат</h2>
+          </div>
+          <div id="status-pill" class="status-pill">Подключение...</div>
+        </div>
+
+        <section id="messages" class="messages" aria-live="polite"></section>
+
+        <section class="composer card">
+          <form id="message-form" class="message-form">
+            <textarea
+              id="message-input"
+              rows="3"
+              placeholder="Напишите сообщение..."
+            ></textarea>
+            <button type="submit">Отправить сообщение</button>
+          </form>
+
+          <form id="file-form" class="file-form">
+            <label class="file-picker" for="file-input">Выбрать файл</label>
+            <input id="file-input" type="file" />
+            <span id="file-name" class="file-name">Файл не выбран</span>
+            <button type="submit">Отправить файл</button>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <template id="empty-state-template">
+      <div class="empty-state">
+        <p>Пока сообщений нет. Отправьте первое сообщение в чат.</p>
+      </div>
+    </template>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+  </html>

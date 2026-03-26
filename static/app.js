@@ -20,6 +20,7 @@ const attachmentPreview = document.getElementById("attachment-preview");
 const clearFileButton = document.getElementById("clear-file-button");
 const emptyStateTemplate = document.getElementById("empty-state-template");
 
+const PUBLIC_CHAT_KEY = "public";
 const savedUsername = localStorage.getItem("local-chat-username");
 const defaultTitle = document.title;
 const mobileMedia = window.matchMedia("(max-width: 640px)");
@@ -29,9 +30,10 @@ let selectedRecipient = "";
 let isInitialLoad = true;
 let pollTimer = null;
 let knownMessageIds = new Set();
-let unseenCount = 0;
 let knownUsers = [];
 let allMessages = [];
+let readState = {};
+let hasStoredReadState = false;
 
 if (savedUsername) {
   loginUsernameInput.value = savedUsername;
@@ -83,7 +85,7 @@ logoutButton.addEventListener("click", async () => {
   try {
     await fetch("/api/logout", { method: "POST" });
   } catch (error) {
-    // Nothing else to do here; the local session is still cleared.
+    // The local UI still resets.
   }
 
   stopPolling();
@@ -97,10 +99,7 @@ messageForm.addEventListener("submit", async (event) => {
 });
 
 messageInput.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") {
-    return;
-  }
-  if (event.isComposing) {
+  if (event.key !== "Enter" || event.isComposing) {
     return;
   }
   if (event.shiftKey || event.ctrlKey || event.metaKey) {
@@ -117,14 +116,15 @@ composerDropzone.addEventListener("dragenter", handleDragEnter);
 composerDropzone.addEventListener("dragover", handleDragOver);
 composerDropzone.addEventListener("dragleave", handleDragLeave);
 composerDropzone.addEventListener("drop", handleDrop);
+messagesContainer.addEventListener("scroll", handleMessagesScroll);
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
-    resetUnreadNotifications();
+    handleAttentionRestore();
   }
 });
 
-window.addEventListener("focus", resetUnreadNotifications);
+window.addEventListener("focus", handleAttentionRestore);
 
 if (typeof mobileMedia.addEventListener === "function") {
   mobileMedia.addEventListener("change", syncRecipientAccordion);
@@ -162,11 +162,11 @@ async function resetAndLoadMessages() {
   knownMessageIds = new Set();
   allMessages = [];
   messagesContainer.innerHTML = "";
-  resetUnreadNotifications();
-  await loadMessages({ forceScroll: true });
+  updateDocumentTitle();
+  await loadMessages({ forceScroll: true, jumpToUnread: true });
 }
 
-async function loadMessages({ forceScroll = false } = {}) {
+async function loadMessages({ forceScroll = false, jumpToUnread = false } = {}) {
   const shouldScroll = forceScroll || isInitialLoad || isNearBottom();
   const distanceFromBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop;
 
@@ -190,22 +190,54 @@ async function loadMessages({ forceScroll = false } = {}) {
     allMessages = messages;
     knownMessageIds = new Set(messages.map((message) => message.id));
 
+    if (isInitialLoad && !hasStoredReadState) {
+      initializeReadStateFromMessages();
+    }
+
     updateUsers(data.users || []);
-    renderCurrentChat({ shouldScroll, distanceFromBottom });
+    renderCurrentChat({
+      shouldScroll,
+      distanceFromBottom,
+      forceScroll,
+      jumpToUnread: jumpToUnread || isInitialLoad,
+    });
 
     if (newExternalMessages.length > 0) {
       notifyAboutMessages(newExternalMessages);
     }
 
+    const preserveUnreadMarker = (jumpToUnread || isInitialLoad) && getUnreadCount(getCurrentChatKey()) > 0;
+    if (!document.hidden && document.hasFocus() && shouldScroll && !preserveUnreadMarker) {
+      markCurrentChatAsRead({ rerender: false });
+    }
+
     isInitialLoad = false;
+    updateDocumentTitle();
   } catch (error) {
     // The next poll will retry.
   }
 }
 
-function renderCurrentChat({ shouldScroll = false, distanceFromBottom = 0, forceScroll = false } = {}) {
-  const visibleMessages = getVisibleMessages();
-  renderMessages(visibleMessages);
+function renderCurrentChat({
+  shouldScroll = false,
+  distanceFromBottom = 0,
+  forceScroll = false,
+  jumpToUnread = false,
+} = {}) {
+  const chatKey = getCurrentChatKey();
+  const visibleMessages = getMessagesForChat(chatKey);
+  const unreadMessages = getUnreadMessages(chatKey);
+  const firstUnreadId = unreadMessages[0]?.id || null;
+
+  renderMessages(visibleMessages, {
+    firstUnreadId,
+    unreadCount: unreadMessages.length,
+  });
+
+  if (jumpToUnread && firstUnreadId) {
+    scrollToUnreadMarker();
+    return;
+  }
 
   if (forceScroll || shouldScroll) {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -215,24 +247,76 @@ function renderCurrentChat({ shouldScroll = false, distanceFromBottom = 0, force
   messagesContainer.scrollTop = Math.max(messagesContainer.scrollHeight - distanceFromBottom, 0);
 }
 
-function getVisibleMessages() {
-  if (!selectedRecipient) {
+function getCurrentChatKey() {
+  return getChatKeyForRecipient(selectedRecipient);
+}
+
+function getChatKeyForRecipient(recipient) {
+  return recipient ? `dm:${recipient}` : PUBLIC_CHAT_KEY;
+}
+
+function getChatKeyForMessage(message) {
+  if (!message.is_private) {
+    return PUBLIC_CHAT_KEY;
+  }
+
+  const otherUser = message.user === currentUser ? message.recipient : message.user;
+  return getChatKeyForRecipient(otherUser);
+}
+
+function getMessagesForChat(chatKey) {
+  if (chatKey === PUBLIC_CHAT_KEY) {
     return allMessages.filter((message) => !message.is_private);
   }
 
+  const otherUser = chatKey.replace(/^dm:/, "");
   return allMessages.filter((message) => {
     if (!message.is_private) {
       return false;
     }
 
     return (
-      (message.user === currentUser && message.recipient === selectedRecipient) ||
-      (message.user === selectedRecipient && message.recipient === currentUser)
+      (message.user === currentUser && message.recipient === otherUser) ||
+      (message.user === otherUser && message.recipient === currentUser)
     );
   });
 }
 
-function renderMessages(messages) {
+function getUnreadMessages(chatKey) {
+  const lastReadId = getLastReadId(chatKey);
+  return getMessagesForChat(chatKey).filter((message) => message.user !== currentUser && message.id > lastReadId);
+}
+
+function getUnreadCount(chatKey) {
+  return getUnreadMessages(chatKey).length;
+}
+
+function getLastReadId(chatKey) {
+  return Number(readState[chatKey] || 0);
+}
+
+function getChatLastMessageId(chatKey) {
+  const messages = getMessagesForChat(chatKey);
+  return messages.length > 0 ? messages[messages.length - 1].id : 0;
+}
+
+function getAllChatKeys() {
+  const keys = new Set([PUBLIC_CHAT_KEY]);
+  for (const message of allMessages) {
+    keys.add(getChatKeyForMessage(message));
+  }
+  return [...keys];
+}
+
+function initializeReadStateFromMessages() {
+  for (const chatKey of getAllChatKeys()) {
+    readState[chatKey] = getChatLastMessageId(chatKey);
+  }
+  hasStoredReadState = true;
+  saveReadState();
+}
+
+function renderMessages(messages, { firstUnreadId = null, unreadCount = 0 } = {}) {
   messagesContainer.innerHTML = "";
 
   if (messages.length === 0) {
@@ -247,9 +331,31 @@ function renderMessages(messages) {
     return;
   }
 
+  let unreadMarkerInserted = false;
+
   for (const message of messages) {
+    if (!unreadMarkerInserted && firstUnreadId && message.id === firstUnreadId) {
+      messagesContainer.appendChild(buildUnreadMarker(unreadCount));
+      unreadMarkerInserted = true;
+    }
     messagesContainer.appendChild(buildMessageElement(message));
   }
+}
+
+function buildUnreadMarker(unreadCount) {
+  const marker = document.createElement("div");
+  marker.className = "unread-marker";
+  marker.id = "unread-marker";
+
+  const line = document.createElement("div");
+  line.className = "unread-marker-line";
+
+  const label = document.createElement("span");
+  label.className = "unread-marker-label";
+  label.textContent = unreadCount > 1 ? `Новые сообщения (${unreadCount})` : "Новое сообщение";
+
+  marker.append(line, label);
+  return marker;
 }
 
 function buildMessageElement(message) {
@@ -345,7 +451,6 @@ function buildMessageElement(message) {
 
   body.appendChild(actions);
   article.appendChild(body);
-
   return article;
 }
 
@@ -385,7 +490,6 @@ function updateUsers(users) {
   knownUsers = normalizeUsers(users);
   const availableRecipients = knownUsers.filter((user) => user.name && user.name !== currentUser);
   const hasSelectedRecipient = availableRecipients.some((user) => user.name === selectedRecipient);
-
   if (!hasSelectedRecipient) {
     selectedRecipient = "";
   }
@@ -397,22 +501,26 @@ function updateUsers(users) {
       value: "",
       selected: selectedRecipient === "",
       online: false,
+      unreadCount: getUnreadCount(PUBLIC_CHAT_KEY),
     }),
   );
 
   for (const user of availableRecipients) {
+    const chatKey = getChatKeyForRecipient(user.name);
     recipientOptions.appendChild(
       createRecipientOption({
         label: user.name,
         value: user.name,
         selected: selectedRecipient === user.name,
         online: user.online,
+        unreadCount: getUnreadCount(chatKey),
       }),
     );
   }
 
   updateRecipientSummary();
   updateComposerPlaceholder();
+  updateDocumentTitle();
 }
 
 function normalizeUsers(users) {
@@ -442,14 +550,17 @@ function normalizeUsers(users) {
   return [...map.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
 }
 
-function createRecipientOption({ label, value, selected, online }) {
+function createRecipientOption({ label, value, selected, online, unreadCount }) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `recipient-option ${selected ? "is-selected" : ""}`.trim();
   button.setAttribute("role", "radio");
   button.setAttribute("aria-checked", selected ? "true" : "false");
   button.dataset.recipient = value;
-  button.textContent = label;
+
+  const labelSpan = document.createElement("span");
+  labelSpan.textContent = label;
+  button.appendChild(labelSpan);
 
   if (online) {
     const badge = document.createElement("span");
@@ -458,10 +569,17 @@ function createRecipientOption({ label, value, selected, online }) {
     button.appendChild(badge);
   }
 
+  if (unreadCount > 0) {
+    const badge = document.createElement("span");
+    badge.className = "unread-count-badge";
+    badge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+    button.appendChild(badge);
+  }
+
   button.addEventListener("click", () => {
     selectedRecipient = value;
     updateUsers(knownUsers);
-    renderCurrentChat({ forceScroll: true });
+    renderCurrentChat({ jumpToUnread: true, forceScroll: unreadCount === 0 });
     if (mobileMedia.matches) {
       recipientDetails.open = false;
     }
@@ -497,7 +615,6 @@ function handleDragEnter(event) {
   if (!hasFiles(event)) {
     return;
   }
-
   setDropActive(true);
 }
 
@@ -506,7 +623,6 @@ function handleDragOver(event) {
   if (!hasFiles(event)) {
     return;
   }
-
   event.dataTransfer.dropEffect = "copy";
   setDropActive(true);
 }
@@ -515,7 +631,6 @@ function handleDragLeave(event) {
   if (event.currentTarget.contains(event.relatedTarget)) {
     return;
   }
-
   setDropActive(false);
 }
 
@@ -543,7 +658,6 @@ function getFirstDroppedFile(event) {
   if (!files || files.length === 0) {
     return null;
   }
-
   return files[0];
 }
 
@@ -586,6 +700,7 @@ async function submitComposer() {
     messageInput.value = "";
     clearAttachment();
     await loadMessages({ forceScroll: true });
+    markCurrentChatAsRead({ rerender: false });
     messageInput.focus();
   } catch (error) {
     // The next poll will retry.
@@ -595,6 +710,7 @@ async function submitComposer() {
 function applySession(session) {
   currentUser = session.user;
   currentUserLabel.textContent = session.user;
+  loadReadState();
   updateUsers(session.users || []);
   showApp();
   syncRecipientAccordion();
@@ -634,6 +750,8 @@ function resetClientState() {
   knownMessageIds = new Set();
   knownUsers = [];
   allMessages = [];
+  readState = {};
+  hasStoredReadState = false;
   messagesContainer.innerHTML = "";
   recipientOptions.innerHTML = "";
   recipientCurrent.textContent = "Всем";
@@ -641,7 +759,7 @@ function resetClientState() {
   messageInput.value = "";
   clearAttachment();
   updateComposerPlaceholder();
-  resetUnreadNotifications();
+  updateDocumentTitle();
 }
 
 function ensurePolling() {
@@ -668,6 +786,84 @@ function isNearBottom() {
     messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <
     threshold
   );
+}
+
+function handleMessagesScroll() {
+  if (!document.hidden && isNearBottom()) {
+    markCurrentChatAsRead();
+  }
+}
+
+function handleAttentionRestore() {
+  if (isNearBottom()) {
+    markCurrentChatAsRead();
+  } else {
+    updateDocumentTitle();
+  }
+}
+
+function markCurrentChatAsRead({ rerender = true } = {}) {
+  const chatKey = getCurrentChatKey();
+  const lastMessageId = getChatLastMessageId(chatKey);
+  if (lastMessageId <= getLastReadId(chatKey)) {
+    return;
+  }
+
+  readState[chatKey] = lastMessageId;
+  saveReadState();
+  updateUsers(knownUsers);
+
+  if (rerender) {
+    renderCurrentChat({ forceScroll: true });
+  }
+}
+
+function scrollToUnreadMarker() {
+  requestAnimationFrame(() => {
+    const marker = document.getElementById("unread-marker");
+    if (!marker) {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      return;
+    }
+
+    messagesContainer.scrollTop = Math.max(marker.offsetTop - 18, 0);
+  });
+}
+
+function getReadStateStorageKey() {
+  return currentUser ? `local-chat-read-state:${currentUser}` : "";
+}
+
+function loadReadState() {
+  const storageKey = getReadStateStorageKey();
+  if (!storageKey) {
+    readState = {};
+    hasStoredReadState = false;
+    return;
+  }
+
+  const raw = localStorage.getItem(storageKey);
+  if (!raw) {
+    readState = {};
+    hasStoredReadState = false;
+    return;
+  }
+
+  try {
+    readState = JSON.parse(raw) || {};
+    hasStoredReadState = true;
+  } catch (error) {
+    readState = {};
+    hasStoredReadState = false;
+  }
+}
+
+function saveReadState() {
+  const storageKey = getReadStateStorageKey();
+  if (!storageKey) {
+    return;
+  }
+  localStorage.setItem(storageKey, JSON.stringify(readState));
 }
 
 async function copyMessage(message) {
@@ -721,39 +917,42 @@ async function ensureNotificationPermission() {
 }
 
 function notifyAboutMessages(messages) {
-  if (document.hidden) {
-    unseenCount += messages.length;
-    updateDocumentTitle();
-  }
-
-  if (!document.hidden || !("Notification" in window) || Notification.permission !== "granted") {
+  if (!("Notification" in window) || Notification.permission !== "granted" || !document.hidden) {
     return;
   }
 
   const latestMessage = messages[messages.length - 1];
-  const title =
-    messages.length === 1 ? `Новое сообщение от ${latestMessage.user}` : `${messages.length} новых сообщений`;
+  const title = latestMessage.is_private
+    ? `Новое личное сообщение от ${latestMessage.user}`
+    : messages.length === 1
+      ? `Новое сообщение от ${latestMessage.user}`
+      : `${messages.length} новых сообщений`;
   const body =
-    latestMessage.type === "file" ? `Файл: ${latestMessage.filename}` : latestMessage.text.slice(0, 140);
+    latestMessage.type === "file"
+      ? latestMessage.is_image
+        ? `Изображение: ${latestMessage.filename}`
+        : `Файл: ${latestMessage.filename}`
+      : latestMessage.text.slice(0, 140);
 
   const notification = new Notification(title, {
     body,
-    tag: "local-chat-messages",
+    tag: latestMessage.is_private ? `dm:${latestMessage.user}` : "public",
   });
 
   notification.onclick = () => {
     window.focus();
+    if (latestMessage.is_private) {
+      selectedRecipient = latestMessage.user;
+      updateUsers(knownUsers);
+      renderCurrentChat({ jumpToUnread: true, forceScroll: false });
+    }
     notification.close();
   };
 }
 
-function resetUnreadNotifications() {
-  unseenCount = 0;
-  document.title = defaultTitle;
-}
-
 function updateDocumentTitle() {
-  document.title = unseenCount > 0 ? `(${unseenCount}) ${defaultTitle}` : defaultTitle;
+  const totalUnread = getAllChatKeys().reduce((sum, chatKey) => sum + getUnreadCount(chatKey), 0);
+  document.title = totalUnread > 0 ? `(${totalUnread}) ${defaultTitle}` : defaultTitle;
 }
 
 function formatTime(iso) {

@@ -19,6 +19,9 @@ const dropHint = document.getElementById("drop-hint");
 const attachmentPreview = document.getElementById("attachment-preview");
 const clearFileButton = document.getElementById("clear-file-button");
 const emptyStateTemplate = document.getElementById("empty-state-template");
+const imageLightbox = document.getElementById("image-lightbox");
+const imageLightboxClose = document.getElementById("image-lightbox-close");
+const imageLightboxImg = document.getElementById("image-lightbox-img");
 
 const PUBLIC_CHAT_KEY = "public";
 const savedUsername = localStorage.getItem("local-chat-username");
@@ -117,6 +120,8 @@ composerDropzone.addEventListener("dragover", handleDragOver);
 composerDropzone.addEventListener("dragleave", handleDragLeave);
 composerDropzone.addEventListener("drop", handleDrop);
 messagesContainer.addEventListener("scroll", handleMessagesScroll);
+imageLightbox.addEventListener("click", handleLightboxClick);
+imageLightboxClose.addEventListener("click", closeImageLightbox);
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
@@ -125,6 +130,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 window.addEventListener("focus", handleAttentionRestore);
+window.addEventListener("keydown", handleWindowKeydown);
 
 if (typeof mobileMedia.addEventListener === "function") {
   mobileMedia.addEventListener("change", syncRecipientAccordion);
@@ -373,15 +379,6 @@ function buildMessageElement(message) {
   const meta = document.createElement("div");
   meta.className = "message-meta";
 
-  const privacyBadge = document.createElement("span");
-  privacyBadge.className = `privacy-badge ${message.is_private ? "" : "public"}`.trim();
-  privacyBadge.textContent = message.is_private
-    ? message.user === currentUser
-      ? `Личное -> ${message.recipient}`
-      : `Личное <- ${message.user}`
-    : "Всем";
-  meta.appendChild(privacyBadge);
-
   const time = document.createElement("span");
   time.className = "message-time";
   time.textContent = formatTime(message.created_at);
@@ -394,11 +391,13 @@ function buildMessageElement(message) {
   body.className = "message-body";
 
   if (message.type === "file" && message.is_image) {
-    const mediaLink = document.createElement("a");
+    const mediaLink = document.createElement("button");
+    mediaLink.type = "button";
     mediaLink.className = "image-link";
-    mediaLink.href = message.download_url;
-    mediaLink.target = "_blank";
-    mediaLink.rel = "noreferrer";
+    mediaLink.setAttribute("aria-label", `Открыть изображение ${message.filename}`);
+    mediaLink.addEventListener("click", () => {
+      openImageLightbox(message);
+    });
 
     const image = document.createElement("img");
     image.className = "message-image";
@@ -664,6 +663,34 @@ function getFirstDroppedFile(event) {
 function setDropActive(isActive) {
   composerDropzone.classList.toggle("is-drop-active", isActive);
   dropHint.classList.toggle("is-hidden", !isActive);
+}
+
+function openImageLightbox(message) {
+  imageLightboxImg.src = message.download_url;
+  imageLightboxImg.alt = message.filename || "Изображение";
+  imageLightbox.classList.remove("is-hidden");
+  imageLightbox.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+}
+
+function closeImageLightbox() {
+  imageLightbox.classList.add("is-hidden");
+  imageLightbox.setAttribute("aria-hidden", "true");
+  imageLightboxImg.removeAttribute("src");
+  imageLightboxImg.alt = "";
+  document.body.style.overflow = "";
+}
+
+function handleLightboxClick(event) {
+  if (event.target === imageLightbox || event.target.classList.contains("image-lightbox-backdrop")) {
+    closeImageLightbox();
+  }
+}
+
+function handleWindowKeydown(event) {
+  if (event.key === "Escape" && !imageLightbox.classList.contains("is-hidden")) {
+    closeImageLightbox();
+  }
 }
 
 async function submitComposer() {

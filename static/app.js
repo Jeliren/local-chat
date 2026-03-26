@@ -3,27 +3,31 @@ const appShell = document.getElementById("app-shell");
 const loginForm = document.getElementById("login-form");
 const loginUsernameInput = document.getElementById("login-username");
 const loginPasswordInput = document.getElementById("login-password");
-const loginHint = document.getElementById("login-hint");
 const loginError = document.getElementById("login-error");
 const currentUserLabel = document.getElementById("current-user");
 const logoutButton = document.getElementById("logout-button");
-const recipientSelect = document.getElementById("recipient-select");
-const userList = document.getElementById("user-list");
+const recipientDetails = document.getElementById("recipient-details");
+const recipientCurrent = document.getElementById("recipient-current");
+const recipientOptions = document.getElementById("recipient-options");
 const messagesContainer = document.getElementById("messages");
 const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
 const fileForm = document.getElementById("file-form");
 const fileInput = document.getElementById("file-input");
 const fileName = document.getElementById("file-name");
-const statusPill = document.getElementById("status-pill");
-const serverUrl = document.getElementById("server-url");
 const emptyStateTemplate = document.getElementById("empty-state-template");
 
 const savedUsername = localStorage.getItem("local-chat-username");
+const defaultTitle = document.title;
+const mobileMedia = window.matchMedia("(max-width: 640px)");
+
 let currentUser = "";
-let lastMessageId = 0;
+let selectedRecipient = "";
 let isInitialLoad = true;
 let pollTimer = null;
+let knownMessageIds = new Set();
+let unseenCount = 0;
+let knownUsers = [];
 
 if (savedUsername) {
   loginUsernameInput.value = savedUsername;
@@ -65,15 +69,21 @@ loginForm.addEventListener("submit", async (event) => {
     applySession(data);
     await resetAndLoadMessages();
     ensurePolling();
+    await ensureNotificationPermission();
   } catch (error) {
     showLoginError("Сервер не отвечает.");
   }
 });
 
 logoutButton.addEventListener("click", async () => {
-  await fetch("/api/logout", { method: "POST" });
+  try {
+    await fetch("/api/logout", { method: "POST" });
+  } catch (error) {
+    // Nothing else to do here; the local session is still cleared.
+  }
+
   stopPolling();
-  currentUser = "";
+  resetClientState();
   showAuth();
 });
 
@@ -90,19 +100,26 @@ messageForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const response = await fetch("/api/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, recipient: recipientSelect.value || null }),
-  });
+  try {
+    const response = await fetch("/api/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, recipient: selectedRecipient || null }),
+    });
 
-  if (response.status === 401) {
-    handleUnauthorized();
-    return;
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      return;
+    }
+
+    messageInput.value = "";
+    await loadMessages({ forceScroll: true });
+  } catch (error) {
+    // The next poll will retry.
   }
-
-  messageInput.value = "";
-  await loadMessages();
 });
 
 fileForm.addEventListener("submit", async (event) => {
@@ -115,25 +132,46 @@ fileForm.addEventListener("submit", async (event) => {
 
   const formData = new FormData();
   formData.append("file", selectedFile);
-  formData.append("recipient", recipientSelect.value || "");
+  formData.append("recipient", selectedRecipient);
 
-  const response = await fetch("/api/files", {
-    method: "POST",
-    body: formData,
-  });
+  try {
+    const response = await fetch("/api/files", {
+      method: "POST",
+      body: formData,
+    });
 
-  if (response.status === 401) {
-    handleUnauthorized();
-    return;
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      return;
+    }
+
+    fileForm.reset();
+    fileName.textContent = "Файл не выбран";
+    await loadMessages({ forceScroll: true });
+  } catch (error) {
+    // The next poll will retry.
   }
-
-  fileForm.reset();
-  fileName.textContent = "Файл не выбран";
-  await loadMessages();
 });
 
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    resetUnreadNotifications();
+  }
+});
+
+window.addEventListener("focus", resetUnreadNotifications);
+
+if (typeof mobileMedia.addEventListener === "function") {
+  mobileMedia.addEventListener("change", syncRecipientAccordion);
+} else {
+  mobileMedia.addListener(syncRecipientAccordion);
+}
+
 async function boot() {
-  await loadInfo();
+  syncRecipientAccordion();
   await restoreSession();
 }
 
@@ -149,71 +187,79 @@ async function restoreSession() {
     applySession(data);
     await resetAndLoadMessages();
     ensurePolling();
+    await ensureNotificationPermission();
   } catch (error) {
     showAuth();
   }
 }
 
-async function loadInfo() {
-  try {
-    const response = await fetch("/api/info");
-    const data = await response.json();
-    serverUrl.textContent = data.lan_url;
-  } catch (error) {
-    serverUrl.textContent = "Не удалось определить адрес";
-  }
-}
-
 async function resetAndLoadMessages() {
-  lastMessageId = 0;
   isInitialLoad = true;
+  knownMessageIds = new Set();
   messagesContainer.innerHTML = "";
-  await loadMessages();
+  resetUnreadNotifications();
+  await loadMessages({ forceScroll: true });
 }
 
-async function loadMessages() {
+async function loadMessages({ forceScroll = false } = {}) {
+  const shouldScroll = forceScroll || isInitialLoad || isNearBottom();
+  const distanceFromBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop;
+
   try {
-    const response = await fetch(`/api/messages?after=${lastMessageId}`);
+    const response = await fetch("/api/messages");
     if (response.status === 401) {
       handleUnauthorized();
       return;
     }
+    if (!response.ok) {
+      return;
+    }
 
     const data = await response.json();
-    const messages = data.messages || [];
+    const messages = Array.isArray(data.messages) ? data.messages : [];
+    const previousIds = knownMessageIds;
+    const newExternalMessages = isInitialLoad
+      ? []
+      : messages.filter((message) => !previousIds.has(message.id) && message.user !== currentUser);
+
     updateUsers(data.users || []);
+    renderMessages(messages);
 
-    if (isInitialLoad) {
-      messagesContainer.innerHTML = "";
-      if (messages.length === 0) {
-        messagesContainer.appendChild(emptyStateTemplate.content.cloneNode(true));
-      }
-    } else if (messages.length > 0) {
-      const emptyState = messagesContainer.querySelector(".empty-state");
-      if (emptyState) {
-        emptyState.remove();
-      }
-    }
+    knownMessageIds = new Set(messages.map((message) => message.id));
 
-    for (const message of messages) {
-      renderMessage(message);
-      lastMessageId = Math.max(lastMessageId, message.id);
-    }
-
-    if (messages.length > 0 || isInitialLoad) {
+    if (shouldScroll) {
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    } else {
+      messagesContainer.scrollTop = Math.max(messagesContainer.scrollHeight - distanceFromBottom, 0);
+    }
+
+    if (newExternalMessages.length > 0) {
+      notifyAboutMessages(newExternalMessages);
     }
 
     isInitialLoad = false;
-    statusPill.textContent = "На связи";
   } catch (error) {
-    statusPill.textContent = "Нет ответа";
+    // The next poll will retry.
   }
 }
 
-function renderMessage(message) {
+function renderMessages(messages) {
+  messagesContainer.innerHTML = "";
+
+  if (messages.length === 0) {
+    messagesContainer.appendChild(emptyStateTemplate.content.cloneNode(true));
+    return;
+  }
+
+  for (const message of messages) {
+    messagesContainer.appendChild(buildMessageElement(message));
+  }
+}
+
+function buildMessageElement(message) {
   const article = document.createElement("article");
   article.className = `message ${message.user === currentUser ? "self" : "other"}`;
+  article.dataset.messageId = String(message.id);
 
   const header = document.createElement("div");
   header.className = "message-header";
@@ -225,20 +271,14 @@ function renderMessage(message) {
   const meta = document.createElement("div");
   meta.className = "message-meta";
 
-  if (message.is_private) {
-    const badge = document.createElement("span");
-    badge.className = "privacy-badge";
-    badge.textContent =
-      message.user === currentUser
-        ? `Личное -> ${message.recipient}`
-        : `Личное <- ${message.user}`;
-    meta.appendChild(badge);
-  } else {
-    const badge = document.createElement("span");
-    badge.className = "privacy-badge public";
-    badge.textContent = "Общий чат";
-    meta.appendChild(badge);
-  }
+  const privacyBadge = document.createElement("span");
+  privacyBadge.className = `privacy-badge ${message.is_private ? "" : "public"}`.trim();
+  privacyBadge.textContent = message.is_private
+    ? message.user === currentUser
+      ? `Личное -> ${message.recipient}`
+      : `Личное <- ${message.user}`
+    : "Всем";
+  meta.appendChild(privacyBadge);
 
   const time = document.createElement("span");
   time.className = "message-time";
@@ -248,44 +288,164 @@ function renderMessage(message) {
   header.append(user, meta);
   article.appendChild(header);
 
+  const body = document.createElement("div");
+  body.className = "message-body";
+
   if (message.type === "file") {
     const link = document.createElement("a");
     link.className = "file-link";
     link.href = message.download_url;
     link.textContent = `${message.filename} (${formatBytes(message.size)})`;
-    article.appendChild(link);
+    body.appendChild(link);
   } else {
     const text = document.createElement("p");
     text.className = "message-text";
     text.textContent = message.text;
-    article.appendChild(text);
+    body.appendChild(text);
   }
 
-  messagesContainer.appendChild(article);
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  actions.appendChild(
+    createIconButton("Скопировать", "copy", async () => {
+      await copyMessage(message);
+    }),
+  );
+
+  if (message.user === currentUser) {
+    actions.appendChild(
+      createIconButton("Удалить", "trash", async () => {
+        await deleteMessage(message.id);
+      }, "danger"),
+    );
+  }
+
+  body.appendChild(actions);
+  article.appendChild(body);
+
+  return article;
+}
+
+function createIconButton(label, iconName, onClick, extraClass = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `icon-button ${extraClass}`.trim();
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = getIconSvg(iconName);
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function getIconSvg(iconName) {
+  if (iconName === "trash") {
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 6h18"></path>
+        <path d="M8 6V4h8v2"></path>
+        <path d="M6 6l1 14h10l1-14"></path>
+        <path d="M10 10v6"></path>
+        <path d="M14 10v6"></path>
+      </svg>
+    `;
+  }
+
+  return `
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+      <path d="M5 15V6a2 2 0 0 1 2-2h9"></path>
+    </svg>
+  `;
 }
 
 function updateUsers(users) {
-  const uniqueUsers = users.filter((user, index) => users.indexOf(user) === index);
-  const currentSelection = recipientSelect.value;
-
-  recipientSelect.innerHTML = "";
-  recipientSelect.append(new Option("Общий чат", ""));
-  for (const user of uniqueUsers) {
-    if (user === currentUser) continue;
-    recipientSelect.append(new Option(user, user));
+  knownUsers = normalizeUsers(users);
+  const availableRecipients = knownUsers.filter((user) => user.name && user.name !== currentUser);
+  const hasSelectedRecipient = availableRecipients.some((user) => user.name === selectedRecipient);
+  if (!hasSelectedRecipient) {
+    selectedRecipient = "";
   }
 
-  if ([...recipientSelect.options].some((option) => option.value === currentSelection)) {
-    recipientSelect.value = currentSelection;
+  recipientOptions.innerHTML = "";
+  recipientOptions.appendChild(
+    createRecipientOption({
+      label: "Всем",
+      value: "",
+      selected: selectedRecipient === "",
+      online: false,
+    }),
+  );
+
+  for (const user of availableRecipients) {
+    recipientOptions.appendChild(
+      createRecipientOption({
+        label: user.name,
+        value: user.name,
+        selected: selectedRecipient === user.name,
+        online: user.online,
+      }),
+    );
   }
 
-  userList.innerHTML = "";
-  for (const user of uniqueUsers) {
-    const item = document.createElement("li");
-    item.className = "user-list-item";
-    item.textContent = user === currentUser ? `${user} (вы)` : user;
-    userList.appendChild(item);
+  updateRecipientSummary();
+}
+
+function normalizeUsers(users) {
+  const map = new Map();
+
+  for (const entry of users) {
+    if (typeof entry === "string") {
+      const name = entry.trim();
+      if (name) {
+        map.set(name, { name, online: false });
+      }
+      continue;
+    }
+
+    const name = String(entry?.name || "").trim();
+    if (!name) {
+      continue;
+    }
+
+    const previous = map.get(name);
+    map.set(name, {
+      name,
+      online: Boolean(entry.online) || Boolean(previous?.online),
+    });
   }
+
+  return [...map.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
+}
+
+function createRecipientOption({ label, value, selected, online }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `recipient-option ${selected ? "is-selected" : ""}`.trim();
+  button.setAttribute("role", "radio");
+  button.setAttribute("aria-checked", selected ? "true" : "false");
+  button.dataset.recipient = value;
+  button.textContent = label;
+
+  if (online) {
+    const badge = document.createElement("span");
+    badge.className = "presence-badge";
+    badge.textContent = "онлайн";
+    button.appendChild(badge);
+  }
+
+  button.addEventListener("click", () => {
+    selectedRecipient = value;
+    updateUsers(knownUsers);
+    if (mobileMedia.matches) {
+      recipientDetails.open = false;
+    }
+  });
+
+  return button;
+}
+
+function updateRecipientSummary() {
+  recipientCurrent.textContent = selectedRecipient || "Всем";
 }
 
 function applySession(session) {
@@ -293,12 +453,12 @@ function applySession(session) {
   currentUserLabel.textContent = session.user;
   updateUsers(session.users || []);
   showApp();
+  syncRecipientAccordion();
 }
 
 function showAuth() {
   authScreen.classList.remove("is-hidden");
   appShell.classList.add("is-hidden");
-  statusPill.textContent = "Нужен вход";
 }
 
 function showApp() {
@@ -318,13 +478,31 @@ function hideLoginError() {
 
 function handleUnauthorized() {
   stopPolling();
+  resetClientState();
   showAuth();
   showLoginError("Сессия истекла. Войдите снова.");
 }
 
+function resetClientState() {
+  currentUser = "";
+  selectedRecipient = "";
+  isInitialLoad = true;
+  knownMessageIds = new Set();
+  knownUsers = [];
+  messagesContainer.innerHTML = "";
+  recipientOptions.innerHTML = "";
+  recipientCurrent.textContent = "Всем";
+  currentUserLabel.textContent = "...";
+  fileForm.reset();
+  fileName.textContent = "Файл не выбран";
+  resetUnreadNotifications();
+}
+
 function ensurePolling() {
   stopPolling();
-  pollTimer = window.setInterval(loadMessages, 2000);
+  pollTimer = window.setInterval(() => {
+    void loadMessages();
+  }, 2000);
 }
 
 function stopPolling() {
@@ -332,6 +510,104 @@ function stopPolling() {
     window.clearInterval(pollTimer);
     pollTimer = null;
   }
+}
+
+function syncRecipientAccordion() {
+  recipientDetails.open = !mobileMedia.matches;
+}
+
+function isNearBottom() {
+  const threshold = 80;
+  return (
+    messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <
+    threshold
+  );
+}
+
+async function copyMessage(message) {
+  const text = message.type === "file"
+    ? `${message.filename}\n${new URL(message.download_url, window.location.origin)}`
+    : message.text;
+
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (error) {
+    // Ignore clipboard errors; the UI remains usable.
+  }
+}
+
+async function deleteMessage(messageId) {
+  const confirmed = window.confirm("Удалить сообщение у всех?");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/messages/${messageId}`, {
+      method: "DELETE",
+    });
+
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      return;
+    }
+
+    await loadMessages();
+  } catch (error) {
+    // The next poll will retry.
+  }
+}
+
+async function ensureNotificationPermission() {
+  if (!("Notification" in window) || Notification.permission !== "default") {
+    return;
+  }
+
+  try {
+    await Notification.requestPermission();
+  } catch (error) {
+    // Browsers can reject outside a gesture; fallback stays available.
+  }
+}
+
+function notifyAboutMessages(messages) {
+  if (document.hidden) {
+    unseenCount += messages.length;
+    updateDocumentTitle();
+  }
+
+  if (!document.hidden || !("Notification" in window) || Notification.permission !== "granted") {
+    return;
+  }
+
+  const latestMessage = messages[messages.length - 1];
+  const title =
+    messages.length === 1 ? `Новое сообщение от ${latestMessage.user}` : `${messages.length} новых сообщений`;
+  const body = latestMessage.type === "file"
+    ? `Файл: ${latestMessage.filename}`
+    : latestMessage.text.slice(0, 140);
+
+  const notification = new Notification(title, {
+    body,
+    tag: "local-chat-messages",
+  });
+
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+  };
+}
+
+function resetUnreadNotifications() {
+  unseenCount = 0;
+  document.title = defaultTitle;
+}
+
+function updateDocumentTitle() {
+  document.title = unseenCount > 0 ? `(${unseenCount}) ${defaultTitle}` : defaultTitle;
 }
 
 function formatTime(iso) {

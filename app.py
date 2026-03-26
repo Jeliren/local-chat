@@ -28,7 +28,7 @@ DATA_DIR = BASE_DIR / "data"
 UPLOADS_DIR = DATA_DIR / "uploads"
 MESSAGES_FILE = DATA_DIR / "messages.json"
 SESSION_COOKIE_NAME = "local_chat_session"
-DEFAULT_CHAT_PASSWORD = "local-chat"
+DEFAULT_CHAT_PASSWORD = "19011901"
 CHAT_PASSWORD = os.environ.get("CHAT_PASSWORD", DEFAULT_CHAT_PASSWORD)
 USING_DEFAULT_PASSWORD = "CHAT_PASSWORD" not in os.environ
 
@@ -205,9 +205,10 @@ class ChatStore:
                     visible.append(self._normalize(message))
             return visible
 
-    def list_known_users(self, active_users: list[str]) -> list[str]:
+    def list_known_users(self, active_users: list[str]) -> list[dict[str, bool | str]]:
+        active_set = {clean_username(user) for user in active_users if clean_username(user)}
         with self._lock:
-            users = set(active_users)
+            users = set(active_set)
             for message in self._messages:
                 normalized = self._normalize(message)
                 sender = clean_username(normalized.get("user"))
@@ -216,7 +217,10 @@ class ChatStore:
                     users.add(sender)
                 if recipient:
                     users.add(recipient)
-            return sorted(users, key=str.lower)
+            return [
+                {"name": user, "online": user in active_set}
+                for user in sorted(users, key=str.lower)
+            ]
 
     def get_message_by_file(self, stored_name: str) -> dict | None:
         with self._lock:
@@ -264,6 +268,29 @@ class ChatStore:
             self._save()
             return self._normalize(message)
 
+    def delete_message(self, message_id: int, username: str) -> str:
+        stored_name = ""
+        with self._lock:
+            for index, message in enumerate(self._messages):
+                if message.get("id") != message_id:
+                    continue
+                if clean_username(message.get("user")) != username:
+                    return "forbidden"
+                deleted = self._messages.pop(index)
+                stored_name = str(deleted.get("stored_name") or "")
+                self._save()
+                break
+            else:
+                return "not_found"
+
+        if stored_name:
+            try:
+                (self.uploads_dir / Path(stored_name).name).unlink()
+            except FileNotFoundError:
+                pass
+
+        return "deleted"
+
 
 STORE = ChatStore(MESSAGES_FILE, UPLOADS_DIR)
 SESSIONS = SessionStore()
@@ -309,6 +336,13 @@ class ChatHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/files":
             self.handle_upload()
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/messages/"):
+            self.handle_delete_message(parsed.path)
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
@@ -439,6 +473,28 @@ class ChatHandler(BaseHTTPRequestHandler):
 
         message = STORE.add_file_message(user=user, uploaded_file=uploaded_file, recipient=recipient)
         self.send_json({"message": message}, HTTPStatus.CREATED)
+
+    def handle_delete_message(self, path: str) -> None:
+        user = self.require_user()
+        if not user:
+            return
+
+        message_id_raw = Path(path).name
+        try:
+            message_id = int(message_id_raw)
+        except ValueError:
+            self.send_json({"error": "Invalid message id."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        result = STORE.delete_message(message_id, user)
+        if result == "forbidden":
+            self.send_json({"error": "Only the author can delete this message."}, HTTPStatus.FORBIDDEN)
+            return
+        if result == "not_found":
+            self.send_json({"error": "Message not found."}, HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True})
 
     def read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

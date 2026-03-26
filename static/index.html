@@ -26,50 +26,23 @@
     </section>
 
     <div id="app-shell" class="app-shell is-hidden">
-      <aside class="sidebar">
-        <div class="brand">
-          <p class="eyebrow">Локальная сеть</p>
-          <h1>Local Chat</h1>
-          <p class="subtitle">Общий чат и личные сообщения внутри вашей сети.</p>
-        </div>
+      <header class="topbar">
+        <h1>Local Chat</h1>
+        <div id="current-user" class="current-user-chip">...</div>
+        <button id="logout-button" class="secondary-button" type="button">Выйти</button>
+      </header>
 
-        <section class="card">
-          <p class="section-title">Вы вошли как</p>
-          <div class="identity-row">
-            <strong id="current-user">...</strong>
-            <button id="logout-button" class="secondary-button" type="button">Выйти</button>
-          </div>
-        </section>
-
-        <section class="card">
-          <p class="section-title">Как подключиться</p>
-          <p id="server-url" class="server-url">Определяю адрес...</p>
-          <p class="hint">Откройте этот адрес на других устройствах в той же сети.</p>
-        </section>
-
-        <section class="card">
-          <label for="recipient-select">Кому отправляем</label>
-          <select id="recipient-select">
-            <option value="">Общий чат</option>
-          </select>
-          <p class="hint">Выберите пользователя для личного сообщения или оставьте общий чат.</p>
-        </section>
-
-        <section class="card">
-          <p class="section-title">Пользователи</p>
-          <ul id="user-list" class="user-list"></ul>
-        </section>
-      </aside>
+      <section class="card recipient-panel">
+        <details id="recipient-details">
+          <summary class="recipient-summary">
+            <span>Кому отправляем</span>
+            <span id="recipient-current" class="recipient-current">Всем</span>
+          </summary>
+          <div id="recipient-options" class="recipient-options" role="radiogroup" aria-label="Кому отправляем"></div>
+        </details>
+      </section>
 
       <main class="chat-panel">
-        <div class="messages-header">
-          <div>
-            <p class="eyebrow">Сообщения</p>
-            <h2>Общий чат и личка</h2>
-          </div>
-          <div id="status-pill" class="status-pill">Подключение...</div>
-        </div>
-
         <section id="messages" class="messages" aria-live="polite"></section>
 
         <section class="composer card">

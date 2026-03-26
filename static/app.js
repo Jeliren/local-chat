@@ -33,6 +33,7 @@ const defaultTitle = document.title;
 const mobileMedia = window.matchMedia("(max-width: 640px)");
 
 let currentUser = "";
+let isAdmin = false;
 let selectedRecipient = "";
 let isInitialLoad = true;
 let pollTimer = null;
@@ -314,8 +315,13 @@ function getChatLastMessageId(chatKey) {
 
 function getAllChatKeys() {
   const keys = new Set([PUBLIC_CHAT_KEY]);
-  for (const message of allMessages) {
-    keys.add(getChatKeyForMessage(message));
+  for (const user of knownUsers) {
+    if (user.name && user.name !== currentUser) {
+      keys.add(getChatKeyForRecipient(user.name));
+    }
+  }
+  if (selectedRecipient) {
+    keys.add(getChatKeyForRecipient(selectedRecipient));
   }
   return [...keys];
 }
@@ -457,21 +463,25 @@ function buildMessageElement(message) {
   );
 
   if (message.user === currentUser) {
-    actions.appendChild(
-      createIconButton(
-        "Удалить",
-        "trash",
-        async () => {
-          await deleteMessage(message.id);
-        },
-        "danger",
-      ),
-    );
+    actions.appendChild(createDeleteButton(message.id));
+  } else if (isAdmin) {
+    actions.appendChild(createDeleteButton(message.id));
   }
 
   body.appendChild(actions);
   article.appendChild(body);
   return article;
+}
+
+function createDeleteButton(messageId) {
+  return createIconButton(
+    "Удалить",
+    "trash",
+    async () => {
+      await deleteMessage(messageId);
+    },
+    "danger",
+  );
 }
 
 function buildReplyReference(message) {
@@ -563,10 +573,11 @@ function updateUsers(users) {
     recipientOptions.appendChild(
       createRecipientOption({
         label: user.name,
-        value: user.name,
-        selected: selectedRecipient === user.name,
-        online: user.online,
-        unreadCount: getUnreadCount(chatKey),
+      value: user.name,
+      selected: selectedRecipient === user.name,
+      online: user.online,
+      unreadCount: getUnreadCount(chatKey),
+      canRemove: isAdmin,
       }),
     );
   }
@@ -603,7 +614,10 @@ function normalizeUsers(users) {
   return [...map.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
 }
 
-function createRecipientOption({ label, value, selected, online, unreadCount }) {
+function createRecipientOption({ label, value, selected, online, unreadCount, canRemove = false }) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "recipient-option-wrap";
+
   const button = document.createElement("button");
   button.type = "button";
   button.className = `recipient-option ${selected ? "is-selected" : ""}`.trim();
@@ -629,6 +643,19 @@ function createRecipientOption({ label, value, selected, online, unreadCount }) 
     button.appendChild(badge);
   }
 
+  if (canRemove && value) {
+    const removeButton = createIconButton(
+      `Удалить участника ${label}`,
+      "trash",
+      async (event) => {
+        event.stopPropagation();
+        await deleteUser(label);
+      },
+      "recipient-remove-button danger",
+    );
+    wrapper.appendChild(removeButton);
+  }
+
   button.addEventListener("click", () => {
     selectedRecipient = value;
     clearReply();
@@ -639,7 +666,8 @@ function createRecipientOption({ label, value, selected, online, unreadCount }) 
     }
   });
 
-  return button;
+  wrapper.prepend(button);
+  return wrapper;
 }
 
 function updateRecipientSummary() {
@@ -852,6 +880,7 @@ async function submitComposer() {
 
 function applySession(session) {
   currentUser = session.user;
+  isAdmin = Boolean(session.is_admin);
   currentUserLabel.textContent = session.user;
   loadReadState();
   updateUsers(session.users || []);
@@ -888,6 +917,7 @@ function handleUnauthorized() {
 
 function resetClientState() {
   currentUser = "";
+  isAdmin = false;
   selectedRecipient = "";
   isInitialLoad = true;
   knownMessageIds = new Set();
@@ -1063,6 +1093,33 @@ async function deleteMessage(messageId) {
     }
 
     await loadMessages();
+  } catch (error) {
+    // The next poll will retry.
+  }
+}
+
+async function deleteUser(username) {
+  const confirmed = window.confirm(`Удалить участника ${username} из списка чатов?`);
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/users/${encodeURIComponent(username)}`, {
+      method: "DELETE",
+    });
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      return;
+    }
+
+    if (selectedRecipient === username) {
+      selectedRecipient = "";
+    }
+    await loadMessages({ forceScroll: true });
   } catch (error) {
     // The next poll will retry.
   }

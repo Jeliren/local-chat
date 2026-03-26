@@ -27,9 +27,11 @@ STATIC_DIR = BASE_DIR / "static"
 DATA_DIR = BASE_DIR / "data"
 UPLOADS_DIR = DATA_DIR / "uploads"
 MESSAGES_FILE = DATA_DIR / "messages.json"
+REMOVED_USERS_FILE = DATA_DIR / "removed_users.json"
 SESSION_COOKIE_NAME = "local_chat_session"
 DEFAULT_CHAT_PASSWORD = "19011901"
 CHAT_PASSWORD = os.environ.get("CHAT_PASSWORD", DEFAULT_CHAT_PASSWORD)
+ADMIN_CHAT_PASSWORD = "190119011"
 USING_DEFAULT_PASSWORD = "CHAT_PASSWORD" not in os.environ
 
 
@@ -144,19 +146,28 @@ class StoredFile:
 class SessionStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._sessions: dict[str, str] = {}
+        self._sessions: dict[str, dict[str, object]] = {}
 
-    def create(self, username: str) -> str:
+    def create(self, username: str, is_admin: bool = False) -> str:
         token = secrets.token_urlsafe(32)
         with self._lock:
-            self._sessions[token] = username
+            self._sessions[token] = {"user": username, "is_admin": is_admin}
         return token
 
-    def get_user(self, token: str | None) -> str | None:
+    def get_session(self, token: str | None) -> dict[str, object] | None:
         if not token:
             return None
         with self._lock:
-            return self._sessions.get(token)
+            session = self._sessions.get(token)
+            return dict(session) if session else None
+
+    def get_user(self, token: str | None) -> str | None:
+        session = self.get_session(token)
+        return clean_username(session.get("user")) if session else None
+
+    def is_admin(self, token: str | None) -> bool:
+        session = self.get_session(token)
+        return bool(session and session.get("is_admin"))
 
     def delete(self, token: str | None) -> None:
         if not token:
@@ -166,7 +177,69 @@ class SessionStore:
 
     def list_users(self) -> list[str]:
         with self._lock:
-            return sorted(set(self._sessions.values()), key=str.lower)
+            return sorted(
+                {clean_username(str(session.get("user") or "")) for session in self._sessions.values() if clean_username(str(session.get("user") or ""))},
+                key=str.lower,
+            )
+
+    def delete_user_sessions(self, username: str) -> None:
+        clean_name = clean_username(username)
+        with self._lock:
+            tokens_to_remove = [
+                token
+                for token, session in self._sessions.items()
+                if clean_username(str(session.get("user") or "")) == clean_name
+            ]
+            for token in tokens_to_remove:
+                self._sessions.pop(token, None)
+
+
+class RemovedUserStore:
+    def __init__(self, storage_path: Path) -> None:
+        self.storage_path = storage_path
+        self._lock = threading.Lock()
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        self._removed_users: set[str] = set()
+        self._load()
+
+    def _load(self) -> None:
+        if not self.storage_path.exists():
+            return
+        try:
+            loaded = json.loads(self.storage_path.read_text(encoding="utf-8"))
+            self._removed_users = {
+                clean_username(item)
+                for item in loaded
+                if clean_username(item)
+            }
+        except (OSError, json.JSONDecodeError, TypeError):
+            self._removed_users = set()
+
+    def _save(self) -> None:
+        self.storage_path.write_text(
+            json.dumps(sorted(self._removed_users), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def is_removed(self, username: str) -> bool:
+        clean_name = clean_username(username)
+        with self._lock:
+            return clean_name in self._removed_users
+
+    def add(self, username: str) -> bool:
+        clean_name = clean_username(username)
+        if not clean_name:
+            return False
+        with self._lock:
+            if clean_name in self._removed_users:
+                return False
+            self._removed_users.add(clean_name)
+            self._save()
+            return True
+
+    def list_all(self) -> set[str]:
+        with self._lock:
+            return set(self._removed_users)
 
 
 class ChatStore:
@@ -267,8 +340,9 @@ class ChatStore:
                     visible.append(self._normalize(message))
             return visible
 
-    def list_known_users(self, active_users: list[str]) -> list[dict[str, bool | str]]:
+    def list_known_users(self, active_users: list[str], excluded_users: set[str] | None = None) -> list[dict[str, bool | str]]:
         active_set = {clean_username(user) for user in active_users if clean_username(user)}
+        excluded_set = {clean_username(user) for user in (excluded_users or set()) if clean_username(user)}
         with self._lock:
             users = set(active_set)
             for message in self._messages:
@@ -282,6 +356,7 @@ class ChatStore:
             return [
                 {"name": user, "online": user in active_set}
                 for user in sorted(users, key=str.lower)
+                if user and user not in excluded_set
             ]
 
     def get_message_by_file(self, stored_name: str) -> dict | None:
@@ -366,13 +441,13 @@ class ChatStore:
             self._save()
             return self._normalize(message)
 
-    def delete_message(self, message_id: int, username: str) -> str:
+    def delete_message(self, message_id: int, username: str, can_delete_any: bool = False) -> str:
         stored_name = ""
         with self._lock:
             for index, message in enumerate(self._messages):
                 if message.get("id") != message_id:
                     continue
-                if clean_username(message.get("user")) != username:
+                if not can_delete_any and clean_username(message.get("user")) != username:
                     return "forbidden"
                 deleted = self._messages.pop(index)
                 stored_name = str(deleted.get("stored_name") or "")
@@ -392,6 +467,7 @@ class ChatStore:
 
 STORE = ChatStore(MESSAGES_FILE, UPLOADS_DIR)
 SESSIONS = SessionStore()
+REMOVED_USERS = RemovedUserStore(REMOVED_USERS_FILE)
 
 
 class ChatHandler(BaseHTTPRequestHandler):
@@ -442,6 +518,9 @@ class ChatHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/messages/"):
             self.handle_delete_message(parsed.path)
             return
+        if parsed.path.startswith("/api/users/"):
+            self.handle_delete_user(parsed.path)
+            return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def get_current_user(self) -> str | None:
@@ -455,11 +534,31 @@ class ChatHandler(BaseHTTPRequestHandler):
             return None
         return SESSIONS.get_user(morsel.value)
 
+    def is_current_admin(self) -> bool:
+        cookie_header = self.headers.get("Cookie", "")
+        if not cookie_header:
+            return False
+        cookie = SimpleCookie()
+        cookie.load(cookie_header)
+        morsel = cookie.get(SESSION_COOKIE_NAME)
+        if not morsel:
+            return False
+        return SESSIONS.is_admin(morsel.value)
+
     def require_user(self) -> str | None:
         user = self.get_current_user()
         if user:
             return user
         self.send_json({"error": "Authentication required."}, HTTPStatus.UNAUTHORIZED)
+        return None
+
+    def require_admin(self) -> str | None:
+        user = self.require_user()
+        if not user:
+            return None
+        if self.is_current_admin():
+            return user
+        self.send_json({"error": "Admin access required."}, HTTPStatus.FORBIDDEN)
         return None
 
     def handle_info(self) -> None:
@@ -481,7 +580,8 @@ class ChatHandler(BaseHTTPRequestHandler):
             {
                 "authenticated": True,
                 "user": user,
-                "users": STORE.list_known_users(SESSIONS.list_users()),
+                "is_admin": self.is_current_admin(),
+                "users": STORE.list_known_users(SESSIONS.list_users(), REMOVED_USERS.list_all()),
             }
         )
 
@@ -493,16 +593,21 @@ class ChatHandler(BaseHTTPRequestHandler):
         if not username or not password:
             self.send_json({"error": "Username and password are required."}, HTTPStatus.BAD_REQUEST)
             return
-        if password != CHAT_PASSWORD:
+        is_admin = password == ADMIN_CHAT_PASSWORD
+        if password not in {CHAT_PASSWORD, ADMIN_CHAT_PASSWORD}:
             self.send_json({"error": "Wrong password."}, HTTPStatus.UNAUTHORIZED)
             return
+        if REMOVED_USERS.is_removed(username) and not is_admin:
+            self.send_json({"error": "This user has been removed by admin."}, HTTPStatus.FORBIDDEN)
+            return
 
-        token = SESSIONS.create(username)
+        token = SESSIONS.create(username, is_admin=is_admin)
         self.send_json(
             {
                 "authenticated": True,
                 "user": username,
-                "users": STORE.list_known_users(SESSIONS.list_users()),
+                "is_admin": is_admin,
+                "users": STORE.list_known_users(SESSIONS.list_users(), REMOVED_USERS.list_all()),
             },
             headers={"Set-Cookie": f"{SESSION_COOKIE_NAME}={token}; HttpOnly; Path=/; SameSite=Lax"},
         )
@@ -533,7 +638,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.send_json(
             {
                 "messages": STORE.list_messages_for_user(user, after_id),
-                "users": STORE.list_known_users(SESSIONS.list_users()),
+                "users": STORE.list_known_users(SESSIONS.list_users(), REMOVED_USERS.list_all()),
             }
         )
 
@@ -644,15 +749,32 @@ class ChatHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Invalid message id."}, HTTPStatus.BAD_REQUEST)
             return
 
-        result = STORE.delete_message(message_id, user)
+        result = STORE.delete_message(message_id, user, can_delete_any=self.is_current_admin())
         if result == "forbidden":
-            self.send_json({"error": "Only the author can delete this message."}, HTTPStatus.FORBIDDEN)
+            self.send_json({"error": "Only the author or admin can delete this message."}, HTTPStatus.FORBIDDEN)
             return
         if result == "not_found":
             self.send_json({"error": "Message not found."}, HTTPStatus.NOT_FOUND)
             return
 
         self.send_json({"ok": True})
+
+    def handle_delete_user(self, path: str) -> None:
+        admin_user = self.require_admin()
+        if not admin_user:
+            return
+
+        username = clean_username(Path(path).name)
+        if not username:
+            self.send_json({"error": "Invalid username."}, HTTPStatus.BAD_REQUEST)
+            return
+        if username == admin_user:
+            self.send_json({"error": "You cannot remove yourself."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        removed = REMOVED_USERS.add(username)
+        SESSIONS.delete_user_sessions(username)
+        self.send_json({"ok": True, "removed": removed})
 
     def read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

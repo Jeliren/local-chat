@@ -1,15 +1,21 @@
 :root {
   color-scheme: light;
-  --panel: rgba(255, 250, 243, 0.9);
-  --line: #d6c8b0;
-  --text: #1c1914;
-  --muted: #6e6456;
-  --accent: #19647e;
-  --accent-strong: #0d4f63;
-  --success: #2c7b4b;
-  --bubble-self: #cfe8ef;
-  --bubble-other: #f8ead6;
-  --shadow: 0 20px 60px rgba(44, 35, 20, 0.12);
+  --surface: rgba(255, 255, 255, 0.18);
+  --surface-strong: rgba(255, 255, 255, 0.28);
+  --surface-soft: rgba(255, 255, 255, 0.12);
+  --line: rgba(255, 255, 255, 0.38);
+  --line-soft: rgba(255, 255, 255, 0.18);
+  --line-dark: rgba(38, 56, 88, 0.12);
+  --text: #112033;
+  --muted: rgba(17, 32, 51, 0.66);
+  --accent: #2c6cf6;
+  --accent-strong: #194fc5;
+  --success: #138a58;
+  --danger: #c8465d;
+  --bubble-self: rgba(221, 236, 255, 0.3);
+  --bubble-other: rgba(255, 255, 255, 0.18);
+  --shadow: 0 22px 70px rgba(25, 45, 84, 0.18);
+  --inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
 * {
@@ -24,11 +30,43 @@ body {
 body {
   margin: 0;
   overflow: hidden;
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-family: "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.8), transparent 35%),
-    linear-gradient(135deg, #efe3cf 0%, #f8f3eb 42%, #e6ece7 100%);
+    radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.86) 0%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 84% 18%, rgba(184, 226, 255, 0.7) 0%, rgba(184, 226, 255, 0) 26%),
+    radial-gradient(circle at 78% 76%, rgba(165, 196, 255, 0.5) 0%, rgba(165, 196, 255, 0) 24%),
+    radial-gradient(circle at 24% 86%, rgba(255, 215, 233, 0.58) 0%, rgba(255, 215, 233, 0) 30%),
+    linear-gradient(160deg, #eef6ff 0%, #e7f0ff 24%, #eaf2ff 48%, #f7f1ff 76%, #eef5ff 100%);
+  position: relative;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: auto;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(40px);
+}
+
+body::before {
+  top: -120px;
+  left: -120px;
+  width: 340px;
+  height: 340px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+body::after {
+  right: -120px;
+  bottom: -120px;
+  width: 380px;
+  height: 380px;
+  border-radius: 50%;
+  background: rgba(143, 199, 255, 0.34);
 }
 
 button,
@@ -46,23 +84,56 @@ textarea {
   display: grid;
   place-items: center;
   padding: 24px;
+  position: relative;
+  z-index: 1;
 }
 
 .auth-card,
 .card,
-.messages {
-  background: var(--panel);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(214, 200, 176, 0.9);
-  border-radius: 24px;
-  box-shadow: var(--shadow);
+.messages,
+.message,
+.current-user-chip,
+.secondary-button,
+.recipient-option,
+.icon-button,
+.file-picker,
+.send-button,
+.attachment-chip {
+  position: relative;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.14));
+  box-shadow: var(--shadow), var(--inner-highlight);
+  backdrop-filter: blur(26px) saturate(165%);
+  -webkit-backdrop-filter: blur(26px) saturate(165%);
+}
+
+.auth-card::before,
+.card::before,
+.messages::before,
+.message::before,
+.current-user-chip::before,
+.secondary-button::before,
+.recipient-option::before,
+.icon-button::before,
+.file-picker::before,
+.send-button::before,
+.attachment-chip::before {
+  content: "";
+  position: absolute;
+  inset: 1px 1px auto;
+  height: 44%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0));
+  opacity: 0.9;
+  pointer-events: none;
 }
 
 .auth-card {
-  width: min(420px, 100%);
-  padding: 28px;
+  width: min(440px, 100%);
+  padding: 30px;
   display: grid;
   gap: 12px;
+  border-radius: 34px;
 }
 
 .auth-card h1,
@@ -73,9 +144,9 @@ textarea {
 .eyebrow {
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.74rem;
-  color: var(--accent);
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: rgba(44, 108, 246, 0.8);
 }
 
 .subtitle,
@@ -86,59 +157,106 @@ textarea {
 
 .error-text {
   margin: 0;
-  color: #a53232;
+  color: #ad2e49;
   font-weight: 700;
 }
 
 input,
 textarea {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.9);
-  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.44));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 10px 30px rgba(61, 95, 160, 0.08);
   color: var(--text);
+  padding: 14px 16px;
+  outline: none;
+}
+
+input:focus,
+textarea:focus {
+  border-color: rgba(44, 108, 246, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.84),
+    0 0 0 4px rgba(44, 108, 246, 0.12),
+    0 16px 36px rgba(61, 95, 160, 0.12);
 }
 
 textarea {
   resize: none;
-  min-height: 92px;
+  min-height: 102px;
   max-height: 180px;
 }
 
 button {
+  border-radius: 24px;
   border: none;
-  border-radius: 16px;
   padding: 12px 16px;
-  background: var(--accent);
-  color: #fff;
+  color: var(--text);
   cursor: pointer;
-  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  transition:
+    transform 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
   font-weight: 700;
   text-align: center;
 }
 
-button:hover {
-  background: var(--accent-strong);
+button:hover,
+.recipient-option:hover,
+.file-picker:hover {
   transform: translateY(-1px);
+  box-shadow:
+    0 26px 70px rgba(25, 45, 84, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
-.secondary-button {
-  background: transparent;
-  border: 1px solid rgba(28, 25, 20, 0.12);
+.secondary-button,
+.file-picker,
+.icon-button {
   color: var(--text);
 }
 
-.secondary-button:hover {
-  background: rgba(28, 25, 20, 0.06);
+.send-button,
+.auth-card button[type="submit"] {
+  color: #fff;
+  background:
+    linear-gradient(180deg, rgba(84, 146, 255, 0.96), rgba(28, 92, 220, 0.88)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0));
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  box-shadow:
+    0 26px 60px rgba(28, 92, 220, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.send-button:hover,
+.auth-card button[type="submit"]:hover {
+  background:
+    linear-gradient(180deg, rgba(76, 137, 248, 0.98), rgba(21, 78, 191, 0.92)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0));
 }
 
 .app-shell {
   height: 100dvh;
-  padding: 16px 18px 18px;
+  padding: 18px 18px 20px;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border-radius: 36px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: none;
 }
 
 .topbar {
@@ -150,19 +268,28 @@ button:hover {
 }
 
 .topbar h1 {
-  font-size: clamp(1.1rem, 2vw, 1.45rem);
+  font-size: clamp(1.08rem, 2vw, 1.42rem);
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
-.current-user-chip {
+.current-user-chip,
+.secondary-button {
+  min-height: 42px;
+  border-radius: 999px;
+  padding: 0 15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(28, 25, 20, 0.1);
+}
+
+.current-user-chip {
   font-weight: 700;
+}
+
+.card {
+  border-radius: 30px;
 }
 
 .recipient-panel {
@@ -192,7 +319,7 @@ button:hover {
 }
 
 .recipient-current {
-  color: var(--accent-strong);
+  color: rgba(25, 79, 197, 0.9);
 }
 
 .recipient-options {
@@ -208,24 +335,23 @@ button:hover {
   gap: 8px;
   padding: 9px 14px;
   border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.72);
   color: var(--text);
   font-weight: 700;
 }
 
-.recipient-option:hover {
-  background: rgba(255, 255, 255, 0.95);
-}
-
 .recipient-option.is-selected {
-  background: var(--accent);
-  border-color: var(--accent);
+  background:
+    linear-gradient(180deg, rgba(94, 153, 255, 0.78), rgba(47, 109, 232, 0.6)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.1));
   color: #fff;
+  border-color: rgba(255, 255, 255, 0.46);
+  box-shadow:
+    0 24px 58px rgba(47, 109, 232, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
 }
 
 .recipient-option.is-selected .presence-badge {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.2);
   color: #fff;
 }
 
@@ -234,7 +360,7 @@ button:hover {
   align-items: center;
   padding: 4px 8px;
   border-radius: 999px;
-  background: rgba(44, 123, 75, 0.12);
+  background: rgba(19, 138, 88, 0.12);
   color: var(--success);
   font-size: 0.76rem;
   font-weight: 700;
@@ -254,6 +380,21 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  border-radius: 34px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.12)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+}
+
+.messages::after {
+  content: "";
+  position: sticky;
+  bottom: -18px;
+  display: block;
+  height: 44px;
+  margin-top: -44px;
+  background: linear-gradient(180deg, rgba(234, 242, 255, 0), rgba(234, 242, 255, 0.6));
+  pointer-events: none;
 }
 
 .empty-state {
@@ -266,17 +407,21 @@ button:hover {
 .message {
   max-width: min(760px, 100%);
   padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(28, 25, 20, 0.08);
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
 }
 
 .message.self {
   margin-left: auto;
-  background: var(--bubble-self);
+  background:
+    linear-gradient(180deg, rgba(231, 241, 255, 0.54), rgba(201, 226, 255, 0.26)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
 }
 
 .message.other {
-  background: var(--bubble-other);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.1)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
 }
 
 .message-header {
@@ -303,14 +448,14 @@ button:hover {
   align-items: center;
   padding: 5px 10px;
   border-radius: 999px;
-  background: rgba(25, 100, 126, 0.12);
-  color: var(--accent-strong);
+  background: rgba(255, 255, 255, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: rgba(25, 79, 197, 0.92);
   font-size: 0.8rem;
   font-weight: 700;
 }
 
 .privacy-badge.public {
-  background: rgba(28, 25, 20, 0.08);
   color: var(--muted);
 }
 
@@ -324,7 +469,7 @@ button:hover {
 .message-text {
   margin: 0;
   white-space: pre-wrap;
-  line-height: 1.45;
+  line-height: 1.48;
 }
 
 .file-link {
@@ -344,20 +489,13 @@ button:hover {
 }
 
 .icon-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 40px;
   height: 40px;
   padding: 0;
-  border-radius: 12px;
-  border: 1px solid rgba(28, 25, 20, 0.12);
-  background: rgba(255, 255, 255, 0.66);
-  color: var(--text);
-}
-
-.icon-button:hover {
-  background: rgba(255, 255, 255, 0.96);
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .icon-button svg {
@@ -367,11 +505,12 @@ button:hover {
 }
 
 .icon-button.danger {
-  color: #9f3030;
+  color: var(--danger);
 }
 
 .composer {
   padding: 14px;
+  border-radius: 32px;
 }
 
 .composer-form {
@@ -400,9 +539,7 @@ button:hover {
   gap: 10px;
   max-width: 100%;
   padding: 8px 12px;
-  border-radius: 14px;
-  background: rgba(25, 100, 126, 0.1);
-  border: 1px solid rgba(25, 100, 126, 0.16);
+  border-radius: 18px;
 }
 
 .file-name {
@@ -418,17 +555,11 @@ button:hover {
   height: 28px;
   padding: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.78);
-  color: var(--text);
-}
-
-.clear-file-button:hover {
-  background: #fff;
 }
 
 .file-picker,
 .send-button {
-  min-width: 108px;
+  min-width: 112px;
   min-height: 52px;
   display: inline-flex;
   align-items: center;
@@ -436,19 +567,7 @@ button:hover {
 }
 
 .file-picker {
-  border-radius: 16px;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.85);
-  color: var(--text);
-  border: 1px solid var(--line);
-  cursor: pointer;
-  font-weight: 700;
-  transition: transform 0.15s ease, background 0.15s ease;
-}
-
-.file-picker:hover {
-  background: #fff;
-  transform: translateY(-1px);
+  border-radius: 22px;
 }
 
 #file-input {
@@ -469,6 +588,11 @@ button:hover {
 
   .app-shell {
     gap: 10px;
+  }
+
+  .app-shell::before {
+    inset: 8px;
+    border-radius: 28px;
   }
 
   .topbar {

@@ -17,7 +17,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -63,6 +63,13 @@ def collect_interface_ipv4s() -> list[str]:
             continue
         candidates.extend(re.findall(r"\binet (\d+\.\d+\.\d+\.\d+)\b", result.stdout))
     return candidates
+
+
+def build_content_disposition(filename: str) -> str:
+    fallback = "".join(char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_" for char in filename)
+    fallback = fallback.strip(" .") or "download"
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def guess_host_ip() -> str:
@@ -314,7 +321,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type or "application/octet-stream")
         self.send_header("Content-Length", str(target.stat().st_size))
-        self.send_header("Content-Disposition", f'attachment; filename="{original_name}"')
+        self.send_header("Content-Disposition", build_content_disposition(original_name))
         self.end_headers()
         with target.open("rb") as file_obj:
             self.wfile.write(file_obj.read())

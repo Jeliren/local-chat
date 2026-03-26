@@ -125,6 +125,16 @@ def clean_recipient(raw_value: str | None, current_user: str) -> str | None:
     return value
 
 
+def parse_reply_id(raw_value: object) -> int | None:
+    if raw_value is None or raw_value == "" or raw_value == 0 or raw_value == "0":
+        return None
+    try:
+        reply_id = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+    return reply_id if reply_id > 0 else None
+
+
 @dataclass
 class StoredFile:
     filename: str
@@ -192,6 +202,13 @@ class ChatStore:
         recipient = clean_username(normalized.get("recipient"))
         normalized["recipient"] = recipient or None
         normalized["is_private"] = bool(recipient)
+        normalized["reply_to"] = parse_reply_id(normalized.get("reply_to"))
+        if isinstance(normalized.get("reply_preview"), dict):
+            preview = dict(normalized["reply_preview"])
+            preview["id"] = parse_reply_id(preview.get("id"))
+            normalized["reply_preview"] = preview
+        else:
+            normalized["reply_preview"] = None
         if normalized.get("type") == "file":
             content_type = str(
                 normalized.get("content_type")
@@ -209,6 +226,36 @@ class ChatStore:
         if not normalized["is_private"]:
             return True
         return username in {normalized.get("user"), normalized.get("recipient")}
+
+    def _conversation_key(self, message: dict, current_user: str) -> tuple[str, str]:
+        normalized = self._normalize(message)
+        if not normalized["is_private"]:
+            return ("public", "")
+
+        other_user = clean_username(
+            normalized.get("recipient") if normalized.get("user") == current_user else normalized.get("user")
+        )
+        return ("dm", other_user)
+
+    def _conversation_key_for_request(self, recipient: str | None) -> tuple[str, str]:
+        if not recipient:
+            return ("public", "")
+        return ("dm", clean_username(recipient))
+
+    def _build_reply_preview(self, message: dict) -> dict:
+        normalized = self._normalize(message)
+        preview = {
+            "id": normalized.get("id"),
+            "user": normalized.get("user"),
+            "created_at": normalized.get("created_at"),
+            "type": normalized.get("type"),
+        }
+        if normalized.get("type") == "file":
+            preview["filename"] = normalized.get("filename")
+            preview["is_image"] = bool(normalized.get("is_image"))
+        else:
+            preview["text"] = normalized.get("text")
+        return preview
 
     def list_messages_for_user(self, username: str, after_id: int = 0) -> list[dict]:
         with self._lock:
@@ -244,7 +291,30 @@ class ChatStore:
                     return self._normalize(message)
         return None
 
-    def add_text_message(self, user: str, text: str, recipient: str | None = None) -> dict:
+    def get_reply_target(self, message_id: int | None, username: str, recipient: str | None) -> dict | None:
+        if not message_id:
+            return None
+
+        requested_key = self._conversation_key_for_request(recipient)
+        with self._lock:
+            for message in self._messages:
+                if message.get("id") != message_id:
+                    continue
+                if not self._is_visible_to(message, username):
+                    return None
+                if self._conversation_key(message, username) != requested_key:
+                    return None
+                return self._build_reply_preview(message)
+        return None
+
+    def add_text_message(
+        self,
+        user: str,
+        text: str,
+        recipient: str | None = None,
+        reply_to: int | None = None,
+        reply_preview: dict | None = None,
+    ) -> dict:
         with self._lock:
             message = {
                 "id": self._next_id,
@@ -252,6 +322,8 @@ class ChatStore:
                 "user": user,
                 "text": text,
                 "recipient": recipient,
+                "reply_to": reply_to,
+                "reply_preview": reply_preview,
                 "created_at": utc_now_iso(),
             }
             self._next_id += 1
@@ -259,7 +331,14 @@ class ChatStore:
             self._save()
             return self._normalize(message)
 
-    def add_file_message(self, user: str, uploaded_file: StoredFile, recipient: str | None = None) -> dict:
+    def add_file_message(
+        self,
+        user: str,
+        uploaded_file: StoredFile,
+        recipient: str | None = None,
+        reply_to: int | None = None,
+        reply_preview: dict | None = None,
+    ) -> dict:
         safe_name = Path(uploaded_file.filename).name or "file"
         ext = Path(safe_name).suffix
         stored_name = f"{uuid.uuid4().hex}{ext}"
@@ -278,6 +357,8 @@ class ChatStore:
                 "content_type": content_type,
                 "download_url": f"/files/{stored_name}",
                 "recipient": recipient,
+                "reply_to": reply_to,
+                "reply_preview": reply_preview,
                 "created_at": utc_now_iso(),
             }
             self._next_id += 1
@@ -474,6 +555,11 @@ class ChatHandler(BaseHTTPRequestHandler):
                 fields.get("recipient") if isinstance(fields.get("recipient"), str) else None,
                 user,
             )
+            reply_to = parse_reply_id(fields.get("reply_to"))
+            reply_preview = STORE.get_reply_target(reply_to, user, recipient)
+            if reply_to and not reply_preview:
+                self.send_json({"error": "Reply target is unavailable."}, HTTPStatus.BAD_REQUEST)
+                return
             uploaded_file = fields.get("file")
 
             if not text and (not isinstance(uploaded_file, StoredFile) or not uploaded_file.content):
@@ -482,10 +568,24 @@ class ChatHandler(BaseHTTPRequestHandler):
 
             created_messages = []
             if text:
-                created_messages.append(STORE.add_text_message(user=user, text=text, recipient=recipient))
+                created_messages.append(
+                    STORE.add_text_message(
+                        user=user,
+                        text=text,
+                        recipient=recipient,
+                        reply_to=reply_to,
+                        reply_preview=reply_preview,
+                    )
+                )
             if isinstance(uploaded_file, StoredFile) and uploaded_file.content:
                 created_messages.append(
-                    STORE.add_file_message(user=user, uploaded_file=uploaded_file, recipient=recipient)
+                    STORE.add_file_message(
+                        user=user,
+                        uploaded_file=uploaded_file,
+                        recipient=recipient,
+                        reply_to=reply_to,
+                        reply_preview=reply_preview,
+                    )
                 )
 
             self.send_json({"messages": created_messages}, HTTPStatus.CREATED)
@@ -494,11 +594,22 @@ class ChatHandler(BaseHTTPRequestHandler):
         data = self.read_json_body()
         text = (data.get("text") or "").strip()
         recipient = clean_recipient(data.get("recipient"), user)
+        reply_to = parse_reply_id(data.get("reply_to"))
+        reply_preview = STORE.get_reply_target(reply_to, user, recipient)
+        if reply_to and not reply_preview:
+            self.send_json({"error": "Reply target is unavailable."}, HTTPStatus.BAD_REQUEST)
+            return
         if not text:
             self.send_json({"error": "Text is required."}, HTTPStatus.BAD_REQUEST)
             return
 
-        message = STORE.add_text_message(user=user, text=text, recipient=recipient)
+        message = STORE.add_text_message(
+            user=user,
+            text=text,
+            recipient=recipient,
+            reply_to=reply_to,
+            reply_preview=reply_preview,
+        )
         self.send_json({"message": message}, HTTPStatus.CREATED)
 
     def handle_upload(self) -> None:

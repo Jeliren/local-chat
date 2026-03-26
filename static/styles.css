@@ -99,7 +99,8 @@ textarea {
 .file-picker,
 .send-button,
 .attachment-chip,
-.clear-file-button {
+.clear-file-button,
+.clear-reply-button {
   position: relative;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.14));
@@ -119,7 +120,8 @@ textarea {
 .file-picker::before,
 .send-button::before,
 .attachment-chip::before,
-.clear-file-button::before {
+.clear-file-button::before,
+.clear-reply-button::before {
   content: "";
   position: absolute;
   inset: 1px 1px auto;
@@ -219,7 +221,8 @@ button:hover,
 .secondary-button,
 .file-picker,
 .icon-button,
-.clear-file-button {
+.clear-file-button,
+.clear-reply-button {
   color: var(--text);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0.16)),
@@ -464,6 +467,7 @@ button:hover,
   padding: 14px 16px;
   border-radius: 28px;
   border: 1px solid rgba(255, 255, 255, 0.34);
+  position: relative;
 }
 
 .message.self {
@@ -509,6 +513,48 @@ button:hover,
   margin: 0;
   white-space: pre-wrap;
   line-height: 1.48;
+}
+
+.message-reply-reference,
+.reply-preview {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.14)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  box-shadow:
+    0 16px 36px rgba(25, 45, 84, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+}
+
+.message-reply-reference {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  text-align: left;
+}
+
+.message-reply-reference:hover {
+  transform: translateY(-1px);
+}
+
+.message-reply-title,
+.reply-preview-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: rgba(25, 79, 197, 0.92);
+}
+
+.message-reply-body,
+.reply-preview-body {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.35;
 }
 
 .image-message {
@@ -647,6 +693,22 @@ button:hover,
   color: var(--danger);
 }
 
+.reply-button {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.message:hover .reply-button,
+.message:focus-within .reply-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .composer {
   padding: 14px;
   border-radius: 32px;
@@ -655,6 +717,29 @@ button:hover,
 .composer-form {
   display: grid;
   gap: 10px;
+}
+
+.reply-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: 20px;
+}
+
+.reply-preview-text {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.clear-reply-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  align-self: center;
 }
 
 .composer-row {
@@ -822,6 +907,11 @@ button:hover,
 
   .message-actions {
     justify-content: flex-end;
+  }
+
+  .reply-button {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .file-picker,

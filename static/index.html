@@ -47,6 +47,13 @@
 
         <section class="composer card">
           <form id="message-form" class="composer-form">
+            <div id="reply-preview" class="reply-preview is-hidden">
+              <div class="reply-preview-text">
+                <div id="reply-preview-title" class="reply-preview-title"></div>
+                <div id="reply-preview-body" class="reply-preview-body"></div>
+              </div>
+              <button id="clear-reply-button" class="clear-reply-button" type="button" aria-label="Отменить ответ">×</button>
+            </div>
             <div class="composer-row">
               <div id="composer-dropzone" class="composer-input-wrap">
                 <textarea

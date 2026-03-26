@@ -12,6 +12,10 @@ const recipientOptions = document.getElementById("recipient-options");
 const messagesContainer = document.getElementById("messages");
 const messageForm = document.getElementById("message-form");
 const composerDropzone = document.getElementById("composer-dropzone");
+const replyPreview = document.getElementById("reply-preview");
+const replyPreviewTitle = document.getElementById("reply-preview-title");
+const replyPreviewBody = document.getElementById("reply-preview-body");
+const clearReplyButton = document.getElementById("clear-reply-button");
 const messageInput = document.getElementById("message-input");
 const fileInput = document.getElementById("file-input");
 const fileName = document.getElementById("file-name");
@@ -37,6 +41,7 @@ let knownUsers = [];
 let allMessages = [];
 let readState = {};
 let hasStoredReadState = false;
+let currentReply = null;
 
 if (savedUsername) {
   loginUsernameInput.value = savedUsername;
@@ -115,6 +120,7 @@ messageInput.addEventListener("keydown", (event) => {
 
 fileInput.addEventListener("change", updateAttachmentPreview);
 clearFileButton.addEventListener("click", clearAttachment);
+clearReplyButton.addEventListener("click", clearReply);
 composerDropzone.addEventListener("dragenter", handleDragEnter);
 composerDropzone.addEventListener("dragover", handleDragOver);
 composerDropzone.addEventListener("dragleave", handleDragLeave);
@@ -387,6 +393,11 @@ function buildMessageElement(message) {
   header.append(user, meta);
   article.appendChild(header);
 
+  const replyReference = buildReplyReference(message);
+  if (replyReference) {
+    article.appendChild(replyReference);
+  }
+
   const body = document.createElement("div");
   body.className = "message-body";
 
@@ -430,6 +441,16 @@ function buildMessageElement(message) {
   const actions = document.createElement("div");
   actions.className = "message-actions";
   actions.appendChild(
+    createIconButton(
+      "Ответить",
+      "reply",
+      () => {
+        startReply(message);
+      },
+      "reply-button",
+    ),
+  );
+  actions.appendChild(
     createIconButton("Скопировать", "copy", async () => {
       await copyMessage(message);
     }),
@@ -453,6 +474,31 @@ function buildMessageElement(message) {
   return article;
 }
 
+function buildReplyReference(message) {
+  const replyData = resolveReplyPreview(message);
+  if (!replyData) {
+    return null;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "message-reply-reference";
+  button.addEventListener("click", () => {
+    jumpToMessage(replyData.id);
+  });
+
+  const title = document.createElement("div");
+  title.className = "message-reply-title";
+  title.textContent = `Ответ ${replyData.user} · ${formatTime(replyData.created_at)}`;
+
+  const body = document.createElement("div");
+  body.className = "message-reply-body";
+  body.textContent = getReplyExcerpt(replyData);
+
+  button.append(title, body);
+  return button;
+}
+
 function createIconButton(label, iconName, onClick, extraClass = "") {
   const button = document.createElement("button");
   button.type = "button";
@@ -465,6 +511,14 @@ function createIconButton(label, iconName, onClick, extraClass = "") {
 }
 
 function getIconSvg(iconName) {
+  if (iconName === "reply") {
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 6 4 11l5 5"></path>
+        <path d="M20 18a8 8 0 0 0-8-8H4"></path>
+      </svg>
+    `;
+  }
   if (iconName === "trash") {
     return `
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -577,6 +631,7 @@ function createRecipientOption({ label, value, selected, online, unreadCount }) 
 
   button.addEventListener("click", () => {
     selectedRecipient = value;
+    clearReply();
     updateUsers(knownUsers);
     renderCurrentChat({ jumpToUnread: true, forceScroll: unreadCount === 0 });
     if (mobileMedia.matches) {
@@ -595,6 +650,63 @@ function updateComposerPlaceholder() {
   messageInput.placeholder = selectedRecipient
     ? `Личное сообщение для ${selectedRecipient}...`
     : "Напишите сообщение в общий чат...";
+}
+
+function startReply(message) {
+  currentReply = {
+    id: message.id,
+    user: message.user,
+    created_at: message.created_at,
+    type: message.type,
+    text: message.text || "",
+    filename: message.filename || "",
+    is_image: Boolean(message.is_image),
+  };
+  renderReplyPreview();
+  messageInput.focus();
+}
+
+function clearReply() {
+  currentReply = null;
+  renderReplyPreview();
+}
+
+function renderReplyPreview() {
+  if (!currentReply) {
+    replyPreview.classList.add("is-hidden");
+    replyPreviewTitle.textContent = "";
+    replyPreviewBody.textContent = "";
+    return;
+  }
+
+  replyPreview.classList.remove("is-hidden");
+  replyPreviewTitle.textContent = `Ответ ${currentReply.user} от ${formatTime(currentReply.created_at)}`;
+  replyPreviewBody.textContent = getReplyExcerpt(currentReply);
+}
+
+function resolveReplyPreview(message) {
+  if (message.reply_preview && message.reply_preview.id) {
+    return message.reply_preview;
+  }
+  if (!message.reply_to) {
+    return null;
+  }
+  return allMessages.find((item) => item.id === message.reply_to) || null;
+}
+
+function getReplyExcerpt(replyData) {
+  if (replyData.type === "file") {
+    return replyData.is_image ? `Изображение: ${replyData.filename}` : `Файл: ${replyData.filename}`;
+  }
+  return truncateText(String(replyData.text || ""), 110);
+}
+
+function truncateText(text, maxLength) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized || "Сообщение";
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function updateAttachmentPreview() {
@@ -703,6 +815,9 @@ async function submitComposer() {
 
   const formData = new FormData();
   formData.append("recipient", selectedRecipient);
+  if (currentReply?.id) {
+    formData.append("reply_to", String(currentReply.id));
+  }
   if (text) {
     formData.append("text", text);
   }
@@ -726,6 +841,7 @@ async function submitComposer() {
 
     messageInput.value = "";
     clearAttachment();
+    clearReply();
     await loadMessages({ forceScroll: true });
     markCurrentChatAsRead({ rerender: false });
     messageInput.focus();
@@ -785,6 +901,7 @@ function resetClientState() {
   currentUserLabel.textContent = "...";
   messageInput.value = "";
   clearAttachment();
+  clearReply();
   updateComposerPlaceholder();
   updateDocumentTitle();
 }
@@ -855,6 +972,26 @@ function scrollToUnreadMarker() {
 
     messagesContainer.scrollTop = Math.max(marker.offsetTop - 18, 0);
   });
+}
+
+function jumpToMessage(messageId) {
+  if (!messageId) {
+    return;
+  }
+
+  const target = messagesContainer.querySelector(`[data-message-id="${messageId}"]`);
+  if (!target) {
+    return;
+  }
+
+  target.scrollIntoView({
+    block: "center",
+    behavior: "smooth",
+  });
+  target.classList.add("message-highlight");
+  window.setTimeout(() => {
+    target.classList.remove("message-highlight");
+  }, 1800);
 }
 
 function getReadStateStorageKey() {

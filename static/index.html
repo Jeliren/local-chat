@@ -7,18 +7,38 @@
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <section id="auth-screen" class="auth-screen">
+      <form id="login-form" class="auth-card">
+        <p class="eyebrow">Защищенный вход</p>
+        <h1>Local Chat</h1>
+        <p class="subtitle">Сначала введите пароль, а потом попадёте в общий чат и личные сообщения.</p>
+
+        <label for="login-username">Ваше имя</label>
+        <input id="login-username" maxlength="40" placeholder="Например, Alex" />
+
+        <label for="login-password">Пароль</label>
+        <input id="login-password" type="password" placeholder="Введите пароль чата" />
+
+        <button type="submit">Войти</button>
+        <p id="login-hint" class="hint">Пароль задаётся на сервере. Для смены используйте переменную окружения <code>CHAT_PASSWORD</code>.</p>
+        <p id="login-error" class="error-text" hidden></p>
+      </form>
+    </section>
+
+    <div id="app-shell" class="app-shell is-hidden">
       <aside class="sidebar">
         <div class="brand">
           <p class="eyebrow">Локальная сеть</p>
           <h1>Local Chat</h1>
-          <p class="subtitle">Простой чат для дома, офиса или общей Wi-Fi сети.</p>
+          <p class="subtitle">Общий чат и личные сообщения внутри вашей сети.</p>
         </div>
 
         <section class="card">
-          <label for="username">Ваше имя</label>
-          <input id="username" maxlength="40" placeholder="Например, Alex" />
-          <p class="hint">Имя сохранится в этом браузере.</p>
+          <p class="section-title">Вы вошли как</p>
+          <div class="identity-row">
+            <strong id="current-user">...</strong>
+            <button id="logout-button" class="secondary-button" type="button">Выйти</button>
+          </div>
         </section>
 
         <section class="card">
@@ -26,13 +46,26 @@
           <p id="server-url" class="server-url">Определяю адрес...</p>
           <p class="hint">Откройте этот адрес на других устройствах в той же сети.</p>
         </section>
+
+        <section class="card">
+          <label for="recipient-select">Кому отправляем</label>
+          <select id="recipient-select">
+            <option value="">Общий чат</option>
+          </select>
+          <p class="hint">Выберите пользователя для личного сообщения или оставьте общий чат.</p>
+        </section>
+
+        <section class="card">
+          <p class="section-title">Пользователи</p>
+          <ul id="user-list" class="user-list"></ul>
+        </section>
       </aside>
 
       <main class="chat-panel">
         <div class="messages-header">
           <div>
             <p class="eyebrow">Сообщения</p>
-            <h2>Общий чат</h2>
+            <h2>Общий чат и личка</h2>
           </div>
           <div id="status-pill" class="status-pill">Подключение...</div>
         </div>
@@ -61,7 +94,7 @@
 
     <template id="empty-state-template">
       <div class="empty-state">
-        <p>Пока сообщений нет. Отправьте первое сообщение в чат.</p>
+        <p>Пока сообщений нет. Начните общий чат или отправьте личное сообщение.</p>
       </div>
     </template>
 

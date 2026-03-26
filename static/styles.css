@@ -29,8 +29,83 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-card,
+.brand,
+.card,
+.messages-header,
+.messages,
+.composer {
+  background: rgba(255, 250, 243, 0.88);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(214, 200, 176, 0.9);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  padding: 28px;
+  display: grid;
+  gap: 12px;
+}
+
+.auth-card h1,
+.brand h1,
+.messages-header h2 {
+  margin: 4px 0 10px;
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.74rem;
+  color: var(--accent);
+}
+
+.subtitle,
+.hint,
+.message-time,
+.server-url {
+  color: var(--muted);
+}
+
+.error-text {
+  margin: 0;
+  color: #a53232;
+  font-weight: 700;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 12px 14px;
+  color: var(--text);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 92px;
 }
 
 .app-shell {
@@ -55,41 +130,8 @@ textarea {
 .brand,
 .card,
 .messages-header,
-.messages,
-.composer {
-  background: rgba(255, 250, 243, 0.88);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(214, 200, 176, 0.9);
-  border-radius: 24px;
-  box-shadow: var(--shadow);
-}
-
-.brand,
-.card,
-.messages-header,
 .composer {
   padding: 20px;
-}
-
-.brand h1,
-.messages-header h2 {
-  margin: 4px 0 10px;
-}
-
-.subtitle,
-.hint,
-.message-meta,
-.message-time,
-.server-url {
-  color: var(--muted);
-}
-
-.eyebrow {
-  margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.74rem;
-  color: var(--accent);
 }
 
 .card label,
@@ -99,19 +141,17 @@ textarea {
   font-weight: 700;
 }
 
-#username,
-#message-input {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.85);
-  padding: 12px 14px;
-  color: var(--text);
+.identity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-#message-input {
-  resize: vertical;
-  min-height: 92px;
+.secondary-button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
 }
 
 .chat-panel {
@@ -152,7 +192,7 @@ textarea {
 }
 
 .message {
-  max-width: min(560px, 100%);
+  max-width: min(620px, 100%);
   padding: 16px;
   border-radius: 18px;
   border: 1px solid rgba(28, 25, 20, 0.08);
@@ -174,8 +214,32 @@ textarea {
   margin-bottom: 8px;
 }
 
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .message-user {
   font-weight: 700;
+}
+
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(25, 100, 126, 0.12);
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.privacy-badge.public {
+  background: rgba(28, 25, 20, 0.08);
+  color: var(--muted);
 }
 
 .message-text {
@@ -239,6 +303,21 @@ button:hover {
   color: var(--muted);
 }
 
+.user-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.user-list-item {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(214, 200, 176, 0.75);
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -250,7 +329,8 @@ button:hover {
 }
 
 @media (max-width: 640px) {
-  .app-shell {
+  .app-shell,
+  .auth-screen {
     padding: 14px;
     gap: 14px;
   }
@@ -260,11 +340,17 @@ button:hover {
     align-items: flex-start;
   }
 
+  .identity-row,
   .file-form {
     grid-template-columns: 1fr;
+    display: grid;
   }
 
   .message {
     max-width: 100%;
+  }
+
+  .message-header {
+    flex-direction: column;
   }
 }

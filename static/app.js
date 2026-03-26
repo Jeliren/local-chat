@@ -118,6 +118,7 @@ messageInput.addEventListener("keydown", (event) => {
   event.preventDefault();
   void submitComposer();
 });
+messageInput.addEventListener("paste", handleComposerPaste);
 
 fileInput.addEventListener("change", updateAttachmentPreview);
 clearFileButton.addEventListener("click", clearAttachment);
@@ -782,8 +783,22 @@ function handleDrop(event) {
     return;
   }
 
+  assignAttachment(droppedFile);
+}
+
+function handleComposerPaste(event) {
+  const pastedImage = getFirstPastedImage(event);
+  if (!pastedImage) {
+    return;
+  }
+
+  event.preventDefault();
+  assignAttachment(pastedImage);
+}
+
+function assignAttachment(file) {
   const dataTransfer = new DataTransfer();
-  dataTransfer.items.add(droppedFile);
+  dataTransfer.items.add(file);
   fileInput.files = dataTransfer.files;
   updateAttachmentPreview();
 }
@@ -798,6 +813,21 @@ function getFirstDroppedFile(event) {
     return null;
   }
   return files[0];
+}
+
+function getFirstPastedImage(event) {
+  const items = Array.from(event.clipboardData?.items || []);
+  for (const item of items) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) {
+        return file;
+      }
+    }
+  }
+
+  const files = Array.from(event.clipboardData?.files || []);
+  return files.find((file) => file.type.startsWith("image/")) || null;
 }
 
 function setDropActive(isActive) {

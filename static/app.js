@@ -11,9 +11,11 @@ const recipientCurrent = document.getElementById("recipient-current");
 const recipientOptions = document.getElementById("recipient-options");
 const messagesContainer = document.getElementById("messages");
 const messageForm = document.getElementById("message-form");
+const composerDropzone = document.getElementById("composer-dropzone");
 const messageInput = document.getElementById("message-input");
 const fileInput = document.getElementById("file-input");
 const fileName = document.getElementById("file-name");
+const dropHint = document.getElementById("drop-hint");
 const attachmentPreview = document.getElementById("attachment-preview");
 const clearFileButton = document.getElementById("clear-file-button");
 const emptyStateTemplate = document.getElementById("empty-state-template");
@@ -111,6 +113,10 @@ messageInput.addEventListener("keydown", (event) => {
 
 fileInput.addEventListener("change", updateAttachmentPreview);
 clearFileButton.addEventListener("click", clearAttachment);
+composerDropzone.addEventListener("dragenter", handleDragEnter);
+composerDropzone.addEventListener("dragover", handleDragOver);
+composerDropzone.addEventListener("dragleave", handleDragLeave);
+composerDropzone.addEventListener("drop", handleDrop);
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
@@ -281,7 +287,29 @@ function buildMessageElement(message) {
   const body = document.createElement("div");
   body.className = "message-body";
 
-  if (message.type === "file") {
+  if (message.type === "file" && message.is_image) {
+    const mediaLink = document.createElement("a");
+    mediaLink.className = "image-link";
+    mediaLink.href = message.download_url;
+    mediaLink.target = "_blank";
+    mediaLink.rel = "noreferrer";
+
+    const image = document.createElement("img");
+    image.className = "message-image";
+    image.src = message.download_url;
+    image.alt = message.filename;
+    image.loading = "lazy";
+    mediaLink.appendChild(image);
+
+    const caption = document.createElement("span");
+    caption.className = "image-caption";
+    caption.textContent = message.filename;
+
+    const imageBlock = document.createElement("div");
+    imageBlock.className = "image-message";
+    imageBlock.append(mediaLink, caption);
+    body.appendChild(imageBlock);
+  } else if (message.type === "file") {
     const link = document.createElement("a");
     link.className = "file-link";
     link.href = message.download_url;
@@ -460,7 +488,68 @@ function updateAttachmentPreview() {
 
 function clearAttachment() {
   fileInput.value = "";
+  setDropActive(false);
   updateAttachmentPreview();
+}
+
+function handleDragEnter(event) {
+  event.preventDefault();
+  if (!hasFiles(event)) {
+    return;
+  }
+
+  setDropActive(true);
+}
+
+function handleDragOver(event) {
+  event.preventDefault();
+  if (!hasFiles(event)) {
+    return;
+  }
+
+  event.dataTransfer.dropEffect = "copy";
+  setDropActive(true);
+}
+
+function handleDragLeave(event) {
+  if (event.currentTarget.contains(event.relatedTarget)) {
+    return;
+  }
+
+  setDropActive(false);
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  setDropActive(false);
+
+  const droppedFile = getFirstDroppedFile(event);
+  if (!droppedFile) {
+    return;
+  }
+
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(droppedFile);
+  fileInput.files = dataTransfer.files;
+  updateAttachmentPreview();
+}
+
+function hasFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+
+function getFirstDroppedFile(event) {
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) {
+    return null;
+  }
+
+  return files[0];
+}
+
+function setDropActive(isActive) {
+  composerDropzone.classList.toggle("is-drop-active", isActive);
+  dropHint.classList.toggle("is-hidden", !isActive);
 }
 
 async function submitComposer() {

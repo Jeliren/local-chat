@@ -71,11 +71,16 @@ def collect_interface_ipv4s() -> list[str]:
     return candidates
 
 
-def build_content_disposition(filename: str) -> str:
+def build_content_disposition(filename: str, disposition: str = "attachment") -> str:
     fallback = "".join(char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_" for char in filename)
     fallback = fallback.strip(" .") or "download"
     encoded = quote(filename, safe="")
-    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+    return f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
+def guess_file_content_type(filename: str, stored_name: str = "") -> str:
+    guessed, _ = mimetypes.guess_type(filename or stored_name)
+    return guessed or "application/octet-stream"
 
 
 def guess_host_ip() -> str:
@@ -187,6 +192,16 @@ class ChatStore:
         recipient = clean_username(normalized.get("recipient"))
         normalized["recipient"] = recipient or None
         normalized["is_private"] = bool(recipient)
+        if normalized.get("type") == "file":
+            content_type = str(
+                normalized.get("content_type")
+                or guess_file_content_type(
+                    str(normalized.get("filename") or ""),
+                    str(normalized.get("stored_name") or ""),
+                )
+            )
+            normalized["content_type"] = content_type
+            normalized["is_image"] = content_type.startswith("image/")
         return normalized
 
     def _is_visible_to(self, message: dict, username: str) -> bool:
@@ -250,6 +265,7 @@ class ChatStore:
         stored_name = f"{uuid.uuid4().hex}{ext}"
         target = self.uploads_dir / stored_name
         target.write_bytes(uploaded_file.content)
+        content_type = guess_file_content_type(safe_name, stored_name)
 
         with self._lock:
             message = {
@@ -259,6 +275,7 @@ class ChatStore:
                 "filename": safe_name,
                 "stored_name": stored_name,
                 "size": len(uploaded_file.content),
+                "content_type": content_type,
                 "download_url": f"/files/{stored_name}",
                 "recipient": recipient,
                 "created_at": utc_now_iso(),
@@ -584,11 +601,12 @@ class ChatHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return
 
-        content_type, _ = mimetypes.guess_type(str(target))
+        content_type = str(message.get("content_type") or guess_file_content_type(message.get("filename", ""), stored_name))
+        disposition = "inline" if content_type.startswith("image/") else "attachment"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type or "application/octet-stream")
         self.send_header("Content-Length", str(target.stat().st_size))
-        self.send_header("Content-Disposition", build_content_disposition(message.get("filename", stored_name)))
+        self.send_header("Content-Disposition", build_content_disposition(message.get("filename", stored_name), disposition))
         self.end_headers()
         with target.open("rb") as file_obj:
             self.wfile.write(file_obj.read())

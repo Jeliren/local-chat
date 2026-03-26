@@ -12,9 +12,10 @@ const recipientOptions = document.getElementById("recipient-options");
 const messagesContainer = document.getElementById("messages");
 const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
-const fileForm = document.getElementById("file-form");
 const fileInput = document.getElementById("file-input");
 const fileName = document.getElementById("file-name");
+const attachmentPreview = document.getElementById("attachment-preview");
+const clearFileButton = document.getElementById("clear-file-button");
 const emptyStateTemplate = document.getElementById("empty-state-template");
 
 const savedUsername = localStorage.getItem("local-chat-username");
@@ -28,6 +29,7 @@ let pollTimer = null;
 let knownMessageIds = new Set();
 let unseenCount = 0;
 let knownUsers = [];
+let allMessages = [];
 
 if (savedUsername) {
   loginUsernameInput.value = savedUsername;
@@ -87,74 +89,28 @@ logoutButton.addEventListener("click", async () => {
   showAuth();
 });
 
-fileInput.addEventListener("change", () => {
-  const selected = fileInput.files && fileInput.files[0];
-  fileName.textContent = selected ? selected.name : "Файл не выбран";
-});
-
 messageForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const text = messageInput.value.trim();
-  if (!text) {
-    messageInput.focus();
+  await submitComposer();
+});
+
+messageInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") {
+    return;
+  }
+  if (event.isComposing) {
+    return;
+  }
+  if (event.shiftKey || event.ctrlKey || event.metaKey) {
     return;
   }
 
-  try {
-    const response = await fetch("/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, recipient: selectedRecipient || null }),
-    });
-
-    if (response.status === 401) {
-      handleUnauthorized();
-      return;
-    }
-    if (!response.ok) {
-      return;
-    }
-
-    messageInput.value = "";
-    await loadMessages({ forceScroll: true });
-  } catch (error) {
-    // The next poll will retry.
-  }
-});
-
-fileForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const selectedFile = fileInput.files && fileInput.files[0];
-  if (!selectedFile) {
-    fileInput.click();
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("file", selectedFile);
-  formData.append("recipient", selectedRecipient);
-
-  try {
-    const response = await fetch("/api/files", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (response.status === 401) {
-      handleUnauthorized();
-      return;
-    }
-    if (!response.ok) {
-      return;
-    }
-
-    fileForm.reset();
-    fileName.textContent = "Файл не выбран";
-    await loadMessages({ forceScroll: true });
-  } catch (error) {
-    // The next poll will retry.
-  }
+  void submitComposer();
 });
+
+fileInput.addEventListener("change", updateAttachmentPreview);
+clearFileButton.addEventListener("click", clearAttachment);
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
@@ -172,6 +128,8 @@ if (typeof mobileMedia.addEventListener === "function") {
 
 async function boot() {
   syncRecipientAccordion();
+  updateComposerPlaceholder();
+  updateAttachmentPreview();
   await restoreSession();
 }
 
@@ -196,6 +154,7 @@ async function restoreSession() {
 async function resetAndLoadMessages() {
   isInitialLoad = true;
   knownMessageIds = new Set();
+  allMessages = [];
   messagesContainer.innerHTML = "";
   resetUnreadNotifications();
   await loadMessages({ forceScroll: true });
@@ -222,16 +181,11 @@ async function loadMessages({ forceScroll = false } = {}) {
       ? []
       : messages.filter((message) => !previousIds.has(message.id) && message.user !== currentUser);
 
-    updateUsers(data.users || []);
-    renderMessages(messages);
-
+    allMessages = messages;
     knownMessageIds = new Set(messages.map((message) => message.id));
 
-    if (shouldScroll) {
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    } else {
-      messagesContainer.scrollTop = Math.max(messagesContainer.scrollHeight - distanceFromBottom, 0);
-    }
+    updateUsers(data.users || []);
+    renderCurrentChat({ shouldScroll, distanceFromBottom });
 
     if (newExternalMessages.length > 0) {
       notifyAboutMessages(newExternalMessages);
@@ -243,11 +197,47 @@ async function loadMessages({ forceScroll = false } = {}) {
   }
 }
 
+function renderCurrentChat({ shouldScroll = false, distanceFromBottom = 0, forceScroll = false } = {}) {
+  const visibleMessages = getVisibleMessages();
+  renderMessages(visibleMessages);
+
+  if (forceScroll || shouldScroll) {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    return;
+  }
+
+  messagesContainer.scrollTop = Math.max(messagesContainer.scrollHeight - distanceFromBottom, 0);
+}
+
+function getVisibleMessages() {
+  if (!selectedRecipient) {
+    return allMessages.filter((message) => !message.is_private);
+  }
+
+  return allMessages.filter((message) => {
+    if (!message.is_private) {
+      return false;
+    }
+
+    return (
+      (message.user === currentUser && message.recipient === selectedRecipient) ||
+      (message.user === selectedRecipient && message.recipient === currentUser)
+    );
+  });
+}
+
 function renderMessages(messages) {
   messagesContainer.innerHTML = "";
 
   if (messages.length === 0) {
-    messagesContainer.appendChild(emptyStateTemplate.content.cloneNode(true));
+    const emptyState = emptyStateTemplate.content.cloneNode(true);
+    const text = emptyState.querySelector("p");
+    if (text) {
+      text.textContent = selectedRecipient
+        ? `Пока нет сообщений с ${selectedRecipient}.`
+        : "Пока в общем чате нет сообщений.";
+    }
+    messagesContainer.appendChild(emptyState);
     return;
   }
 
@@ -314,9 +304,14 @@ function buildMessageElement(message) {
 
   if (message.user === currentUser) {
     actions.appendChild(
-      createIconButton("Удалить", "trash", async () => {
-        await deleteMessage(message.id);
-      }, "danger"),
+      createIconButton(
+        "Удалить",
+        "trash",
+        async () => {
+          await deleteMessage(message.id);
+        },
+        "danger",
+      ),
     );
   }
 
@@ -362,6 +357,7 @@ function updateUsers(users) {
   knownUsers = normalizeUsers(users);
   const availableRecipients = knownUsers.filter((user) => user.name && user.name !== currentUser);
   const hasSelectedRecipient = availableRecipients.some((user) => user.name === selectedRecipient);
+
   if (!hasSelectedRecipient) {
     selectedRecipient = "";
   }
@@ -388,6 +384,7 @@ function updateUsers(users) {
   }
 
   updateRecipientSummary();
+  updateComposerPlaceholder();
 }
 
 function normalizeUsers(users) {
@@ -436,6 +433,7 @@ function createRecipientOption({ label, value, selected, online }) {
   button.addEventListener("click", () => {
     selectedRecipient = value;
     updateUsers(knownUsers);
+    renderCurrentChat({ forceScroll: true });
     if (mobileMedia.matches) {
       recipientDetails.open = false;
     }
@@ -446,6 +444,63 @@ function createRecipientOption({ label, value, selected, online }) {
 
 function updateRecipientSummary() {
   recipientCurrent.textContent = selectedRecipient || "Всем";
+}
+
+function updateComposerPlaceholder() {
+  messageInput.placeholder = selectedRecipient
+    ? `Личное сообщение для ${selectedRecipient}...`
+    : "Напишите сообщение в общий чат...";
+}
+
+function updateAttachmentPreview() {
+  const selected = fileInput.files && fileInput.files[0];
+  fileName.textContent = selected ? selected.name : "Файл не выбран";
+  attachmentPreview.classList.toggle("is-hidden", !selected);
+}
+
+function clearAttachment() {
+  fileInput.value = "";
+  updateAttachmentPreview();
+}
+
+async function submitComposer() {
+  const text = messageInput.value.trim();
+  const file = fileInput.files && fileInput.files[0];
+  if (!text && !file) {
+    messageInput.focus();
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("recipient", selectedRecipient);
+  if (text) {
+    formData.append("text", text);
+  }
+  if (file) {
+    formData.append("file", file);
+  }
+
+  try {
+    const response = await fetch("/api/messages", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
+    if (!response.ok) {
+      return;
+    }
+
+    messageInput.value = "";
+    clearAttachment();
+    await loadMessages({ forceScroll: true });
+    messageInput.focus();
+  } catch (error) {
+    // The next poll will retry.
+  }
 }
 
 function applySession(session) {
@@ -489,12 +544,14 @@ function resetClientState() {
   isInitialLoad = true;
   knownMessageIds = new Set();
   knownUsers = [];
+  allMessages = [];
   messagesContainer.innerHTML = "";
   recipientOptions.innerHTML = "";
   recipientCurrent.textContent = "Всем";
   currentUserLabel.textContent = "...";
-  fileForm.reset();
-  fileName.textContent = "Файл не выбран";
+  messageInput.value = "";
+  clearAttachment();
+  updateComposerPlaceholder();
   resetUnreadNotifications();
 }
 
@@ -525,9 +582,10 @@ function isNearBottom() {
 }
 
 async function copyMessage(message) {
-  const text = message.type === "file"
-    ? `${message.filename}\n${new URL(message.download_url, window.location.origin)}`
-    : message.text;
+  const text =
+    message.type === "file"
+      ? `${message.filename}\n${new URL(message.download_url, window.location.origin)}`
+      : message.text;
 
   try {
     await navigator.clipboard.writeText(text);
@@ -586,9 +644,8 @@ function notifyAboutMessages(messages) {
   const latestMessage = messages[messages.length - 1];
   const title =
     messages.length === 1 ? `Новое сообщение от ${latestMessage.user}` : `${messages.length} новых сообщений`;
-  const body = latestMessage.type === "file"
-    ? `Файл: ${latestMessage.filename}`
-    : latestMessage.text.slice(0, 140);
+  const body =
+    latestMessage.type === "file" ? `Файл: ${latestMessage.filename}` : latestMessage.text.slice(0, 140);
 
   const notification = new Notification(title, {
     body,

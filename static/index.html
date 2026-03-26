@@ -46,20 +46,26 @@
         <section id="messages" class="messages" aria-live="polite"></section>
 
         <section class="composer card">
-          <form id="message-form" class="message-form">
-            <textarea
-              id="message-input"
-              rows="3"
-              placeholder="Напишите сообщение..."
-            ></textarea>
-            <button type="submit">Отправить сообщение</button>
-          </form>
+          <form id="message-form" class="composer-form">
+            <div class="composer-row">
+              <div class="composer-input-wrap">
+                <textarea
+                  id="message-input"
+                  rows="3"
+                  placeholder="Напишите сообщение..."
+                ></textarea>
+                <div id="attachment-preview" class="attachment-preview is-hidden">
+                  <div class="attachment-chip">
+                    <span id="file-name" class="file-name">Файл не выбран</span>
+                    <button id="clear-file-button" class="clear-file-button" type="button" aria-label="Убрать файл">×</button>
+                  </div>
+                </div>
+              </div>
 
-          <form id="file-form" class="file-form">
-            <label class="file-picker" for="file-input">Выбрать файл</label>
-            <input id="file-input" type="file" />
-            <span id="file-name" class="file-name">Файл не выбран</span>
-            <button type="submit">Отправить файл</button>
+              <label class="file-picker" for="file-input" aria-label="Прикрепить файл">Файл</label>
+              <input id="file-input" type="file" />
+              <button type="submit" class="send-button">Отправить</button>
+            </div>
           </form>
         </section>
       </main>

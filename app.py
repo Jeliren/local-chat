@@ -444,6 +444,36 @@ class ChatHandler(BaseHTTPRequestHandler):
         if not user:
             return
 
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" in content_type:
+            try:
+                fields = self.read_multipart_form()
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+
+            text = (fields.get("text") if isinstance(fields.get("text"), str) else "").strip()
+            recipient = clean_recipient(
+                fields.get("recipient") if isinstance(fields.get("recipient"), str) else None,
+                user,
+            )
+            uploaded_file = fields.get("file")
+
+            if not text and (not isinstance(uploaded_file, StoredFile) or not uploaded_file.content):
+                self.send_json({"error": "Text or file is required."}, HTTPStatus.BAD_REQUEST)
+                return
+
+            created_messages = []
+            if text:
+                created_messages.append(STORE.add_text_message(user=user, text=text, recipient=recipient))
+            if isinstance(uploaded_file, StoredFile) and uploaded_file.content:
+                created_messages.append(
+                    STORE.add_file_message(user=user, uploaded_file=uploaded_file, recipient=recipient)
+                )
+
+            self.send_json({"messages": created_messages}, HTTPStatus.CREATED)
+            return
+
         data = self.read_json_body()
         text = (data.get("text") or "").strip()
         recipient = clean_recipient(data.get("recipient"), user)
